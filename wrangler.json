@@ -1,0 +1,16 @@
+{
+	"compatibility_date": "2025-10-08",
+	"main": "src/index.ts",
+	"name": "icsvulscore",
+	"upload_source_maps": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_id": "b8ab57ef-7401-4395-aec6-24d0bb46795f",
+			"database_name": "NVD_DB"
+		}
+	],
+	"observability": {
+		"enabled": true
+	}
+}
