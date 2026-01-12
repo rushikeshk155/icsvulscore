@@ -79,14 +79,40 @@ export default {
   async scheduled(event, env) {
     const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
     const currentRows = countResult.total || 0;
+    
+    // Using 500 rows for stability
     const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=500&startIndex=" + currentRows;
-    const response = await fetch(nvdUrl, { headers: { "apiKey": env.NVD_API_KEY, "User-Agent": "Cloudflare-Worker" } });
-    const data = await response.json();
+    
+    const response = await fetch(nvdUrl, { 
+      headers: { 
+        "apiKey": env.NVD_API_KEY, 
+        "User-Agent": "Cloudflare-Worker-ICS-PoC" 
+      } 
+    });
+
+    // SAFETY CHECK: If the response is empty or bad, stop here instead of crashing
+    const text = await response.text();
+    if (!text || text.trim().length === 0) {
+      console.log("NVD returned an empty response. Skipping this cycle.");
+      return;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      console.log("Failed to parse NVD JSON. Skipping this cycle.");
+      return;
+    }
+
+    const vulnerabilities = data.vulnerabilities || [];
     const statements = [];
-    for (const item of data.vulnerabilities) {
+    
+    for (const item of vulnerabilities) {
       const cve = item.cve;
       const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 0;
       statements.push(env.DB.prepare("INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)").bind(cve.id, score, cve.descriptions[0].value));
+      
       if (cve.configurations) {
         for (const config of cve.configurations) {
           for (const node of (config.nodes || [])) {
@@ -100,6 +126,8 @@ export default {
         }
       }
     }
+    
     if (statements.length > 0) await env.DB.batch(statements);
+    console.log(`Successfully processed batch starting at ${currentRows}`);
   }
 };
