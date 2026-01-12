@@ -35,7 +35,7 @@ export default {
 
   async scheduled(event, env) {
     // We use a broader search for the PoC to ensure we get data
-    const nvdUrl = `https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=50`;
+   const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=50";
 
     const response = await fetch(nvdUrl, {
       headers: { 
