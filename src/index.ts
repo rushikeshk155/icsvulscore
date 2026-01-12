@@ -84,37 +84,57 @@ export default {
     const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
     const currentRows = countResult.total || 0;
     
-    // Using 500 rows for faster progress through gaps
-    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=500&startIndex=" + currentRows;
+    // We use 100 rows to ensure the connection stays open long enough to finish
+    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=100&startIndex=" + currentRows;
     
     const response = await fetch(nvdUrl, { 
-      headers: { "apiKey": env.NVD_API_KEY, "User-Agent": "Cloudflare-Worker" } 
+      headers: { 
+        "apiKey": env.NVD_API_KEY, 
+        "User-Agent": "Cloudflare-Worker-ICS-PoC" 
+      } 
     });
 
-    const data = await response.json();
-    const vulnerabilities = data.vulnerabilities || [];
+    // 1. Check if the server responded at all
+    if (!response.ok) return;
 
-    if (vulnerabilities.length === 0) return;
+    // 2. Read as text first to verify it's not empty or cut off
+    const rawText = await response.text();
+    if (!rawText || rawText.length < 100) {
+      console.log("Incomplete data received from NVD. Skipping this cycle.");
+      return;
+    }
 
-    const statements = [];
-    for (const item of vulnerabilities) {
-      const cve = item.cve;
-      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 0;
-      statements.push(env.DB.prepare("INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)").bind(cve.id, score, cve.descriptions[0].value));
+    try {
+      const data = JSON.parse(rawText);
+      const vulnerabilities = data.vulnerabilities || [];
+      const statements = [];
       
-      if (cve.configurations) {
-        for (const config of cve.configurations) {
-          for (const node of (config.nodes || [])) {
-            for (const match of (node.cpeMatch || [])) {
-              const p = match.criteria.split(':');
-              if (p.length > 5) {
-                statements.push(env.DB.prepare("INSERT INTO cve_cpe_mapping (cve_id, part, make, model, firmware, cpe_full) VALUES (?, ?, ?, ?, ?, ?)").bind(cve.id, p[2], p[3], p[4], p[5], match.criteria));
+      for (const item of vulnerabilities) {
+        const cve = item.cve;
+        const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 0;
+        
+        statements.push(env.DB.prepare("INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)").bind(cve.id, score, cve.descriptions[0].value));
+        
+        if (cve.configurations) {
+          for (const config of cve.configurations) {
+            for (const node of (config.nodes || [])) {
+              for (const match of (node.cpeMatch || [])) {
+                const p = match.criteria.split(':');
+                if (p.length > 5) {
+                  statements.push(env.DB.prepare("INSERT INTO cve_cpe_mapping (cve_id, part, make, model, firmware, cpe_full) VALUES (?, ?, ?, ?, ?, ?)").bind(cve.id, p[2], p[3], p[4], p[5], match.criteria));
+                }
               }
             }
           }
         }
       }
+      
+      if (statements.length > 0) {
+        await env.DB.batch(statements);
+        console.log(`Successfully added 100 rows. New total: ${currentRows + 100}`);
+      }
+    } catch (e) {
+      console.log("JSON was malformed. NVD server likely cut the connection early.");
     }
-    if (statements.length > 0) await env.DB.batch(statements);
   }
 };
