@@ -85,7 +85,10 @@ export default {
     // const currentRows = countResult.total || 0;
 
 // Force the script to skip the first 50,000 records to find active data
-const currentRows = (countResult.total || 0) + 50000;
+//const currentRows = (countResult.total || 0) + 50000;
+
+    // Skip the first 60,000 old/empty records to reach active vulnerabilities
+const currentRows = (countResult.total || 0) + 60000;
     
     // We use 100 rows to ensure the connection stays open long enough to finish
     const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=100&startIndex=" + currentRows;
