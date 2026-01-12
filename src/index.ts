@@ -80,7 +80,7 @@ export default {
     const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
     const currentRows = countResult.total || 0;
     
-    // Using 500 rows for stability
+    // We stick to 500 rows for maximum reliability
     const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=500&startIndex=" + currentRows;
     
     const response = await fetch(nvdUrl, { 
@@ -90,10 +90,10 @@ export default {
       } 
     });
 
-    // SAFETY CHECK: If the response is empty or bad, stop here instead of crashing
+    // SAFETY CHECK: Get the raw text first to see if it's empty
     const text = await response.text();
     if (!text || text.trim().length === 0) {
-      console.log("NVD returned an empty response. Skipping this cycle.");
+      console.log("NVD returned an empty response. This happens when the server is busy.");
       return;
     }
 
@@ -101,7 +101,7 @@ export default {
     try {
       data = JSON.parse(text);
     } catch (e) {
-      console.log("Failed to parse NVD JSON. Skipping this cycle.");
+      console.log("Failed to parse JSON. NVD may have sent an incomplete file. Retrying in 30 mins.");
       return;
     }
 
@@ -110,7 +110,9 @@ export default {
     
     for (const item of vulnerabilities) {
       const cve = item.cve;
-      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 0;
+      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 
+                    cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 0;
+
       statements.push(env.DB.prepare("INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)").bind(cve.id, score, cve.descriptions[0].value));
       
       if (cve.configurations) {
@@ -127,7 +129,9 @@ export default {
       }
     }
     
-    if (statements.length > 0) await env.DB.batch(statements);
-    console.log(`Successfully processed batch starting at ${currentRows}`);
+    if (statements.length > 0) {
+      await env.DB.batch(statements);
+      console.log(`Successfully added 500 rows. Current total: ${currentRows + vulnerabilities.length}`);
+    }
   }
 };
