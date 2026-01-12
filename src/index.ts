@@ -34,42 +34,59 @@ export default {
   },
 
   async scheduled(event, env) {
-    // We use a broader search for the PoC to ensure we get data
-   const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=50";
+    // 1. Check current progress
+    const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
+    const currentRows = countResult.total || 0;
 
+    // 2. Fetch the NEXT 2,000 rows using startIndex
+    // NVD allows max 2000 per request. This tells NVD: "Start after the rows I already have"
+    const nvdUrl = `https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=2000&startIndex=${currentRows}`;
+    
     const response = await fetch(nvdUrl, {
       headers: { 
         "apiKey": env.NVD_API_KEY,
-        "User-Agent": "Cloudflare-Worker" 
+        "User-Agent": "Cloudflare-Worker-ICS-PoC" 
       }
     });
 
-    if (!response.ok) throw new Error("NVD API returned " + response.status);
+    if (!response.ok) throw new Error("NVD API Error: " + response.status);
     
     const data = await response.json();
+    const vulnerabilities = data.vulnerabilities || [];
 
-    for (const item of data.vulnerabilities) {
+    // 3. Save the new batch
+    // Using a batch here makes it much faster
+    const statements = [];
+    
+    for (const item of vulnerabilities) {
       const cve = item.cve;
-      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 0;
+      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 
+                    cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 0;
 
-      // Insert CVE
-      await env.DB.prepare(`INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)`)
-        .bind(cve.id, score, cve.descriptions[0].value).run();
+      statements.push(
+        env.DB.prepare(`INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)`)
+           .bind(cve.id, score, cve.descriptions[0].value)
+      );
 
-      // Insert Mappings
       if (cve.configurations) {
         for (const config of cve.configurations) {
           for (const node of (config.nodes || [])) {
             for (const match of (node.cpeMatch || [])) {
               const p = match.criteria.split(':');
               if (p.length > 5) {
-                await env.DB.prepare(`INSERT INTO cve_cpe_mapping (cve_id, part, make, model, firmware, cpe_full) VALUES (?, ?, ?, ?, ?, ?)`)
-                  .bind(cve.id, p[2], p[3], p[4], p[5], match.criteria).run();
+                statements.push(
+                  env.DB.prepare(`INSERT INTO cve_cpe_mapping (cve_id, part, make, model, firmware, cpe_full) VALUES (?, ?, ?, ?, ?, ?)`)
+                    .bind(cve.id, p[2], p[3], p[4], p[5], match.criteria)
+                );
               }
             }
           }
         }
       }
     }
+    
+    // Execute all inserts at once
+    await env.DB.batch(statements);
+    console.log(`Successfully added rows up to index: ${currentRows + vulnerabilities.length}`);
   }
 };
