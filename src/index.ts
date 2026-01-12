@@ -2,13 +2,17 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // This part lets you force a data download by visiting your-worker.dev/sync
+    // Manual Sync Trigger
     if (url.pathname === "/sync") {
-      await this.scheduled(null, env);
-      return new Response("Sync Started! Please check your D1 database in 1 minute.");
+      try {
+        await this.scheduled(null, env);
+        return new Response("Sync completed successfully! Check your D1 database.");
+      } catch (err) {
+        return new Response("Sync Failed: " + err.message, { status: 500 });
+      }
     }
 
-    // This part lets you search your data
+    // Search functionality
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
 
@@ -22,33 +26,37 @@ export default {
 
       return new Response(JSON.stringify({
         query: { make, model },
-        max_cvss_found: result?.maxScore || "No data yet. Did you run /sync?"
+        max_cvss: result?.maxScore || 0
       }), { headers: { "Content-Type": "application/json" } });
     }
 
-    return new Response("NVD ICS Tracker is active. Visit /sync to load data or use ?make=vendor&model=product to search.");
+    return new Response("Worker is live. Visit /sync to load data.");
   },
 
-  // This is the engine that talks to NVD
   async scheduled(event, env) {
-    const last24h = new Date(Date.now() - 86400000).toISOString();
-    const nvdUrl = `https://services.nvd.nist.gov/rest/json/cves/2.0?lastModStartDate=${last24h}`;
+    // We use a broader search for the PoC to ensure we get data
+    const nvdUrl = `https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=50`;
 
     const response = await fetch(nvdUrl, {
-      headers: { "apiKey": env.NVD_API_KEY, "User-Agent": "Cloudflare-Worker" }
+      headers: { 
+        "apiKey": env.NVD_API_KEY,
+        "User-Agent": "Cloudflare-Worker" 
+      }
     });
+
+    if (!response.ok) throw new Error("NVD API returned " + response.status);
+    
     const data = await response.json();
 
     for (const item of data.vulnerabilities) {
       const cve = item.cve;
-      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 
-                    cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 0;
+      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 0;
 
-      // Save main CVE
+      // Insert CVE
       await env.DB.prepare(`INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)`)
         .bind(cve.id, score, cve.descriptions[0].value).run();
 
-      // Save Make/Model/Firmware mappings
+      // Insert Mappings
       if (cve.configurations) {
         for (const config of cve.configurations) {
           for (const node of (config.nodes || [])) {
