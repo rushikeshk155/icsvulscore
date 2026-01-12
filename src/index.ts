@@ -82,7 +82,10 @@ export default {
 
   async scheduled(event, env) {
     const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
-    const currentRows = countResult.total || 0;
+    // const currentRows = countResult.total || 0;
+
+// Force the script to skip the first 50,000 records to find active data
+const currentRows = (countResult.total || 0) + 50000;
     
     // We use 100 rows to ensure the connection stays open long enough to finish
     const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=100&startIndex=" + currentRows;
