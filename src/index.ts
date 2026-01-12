@@ -79,7 +79,7 @@ export default {
   async scheduled(event, env) {
     const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
     const currentRows = countResult.total || 0;
-    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=2000&startIndex=" + currentRows;
+    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=500&startIndex=" + currentRows;
     const response = await fetch(nvdUrl, { headers: { "apiKey": env.NVD_API_KEY, "User-Agent": "Cloudflare-Worker" } });
     const data = await response.json();
     const statements = [];
