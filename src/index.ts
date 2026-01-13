@@ -81,17 +81,12 @@ export default {
   },
 
   async scheduled(event, env) {
+    // START FROM BEGINNING: Asking the DB for the current total
     const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
-    // const currentRows = countResult.total || 0;
-
-// Force the script to skip the first 50,000 records to find active data
-//const currentRows = (countResult.total || 0) + 50000;
-
-    // Skip the first 60,000 old/empty records to reach active vulnerabilities
-const currentRows = (countResult.total || 0) + 60000;
+    const currentRows = countResult.total || 0;
     
-    // We use 100 rows to ensure the connection stays open long enough to finish
-    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=100&startIndex=" + currentRows;
+    // Using 500 rows per batch for faster progress while quota is fresh
+    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=500&startIndex=" + currentRows;
     
     const response = await fetch(nvdUrl, { 
       headers: { 
@@ -100,15 +95,10 @@ const currentRows = (countResult.total || 0) + 60000;
       } 
     });
 
-    // 1. Check if the server responded at all
     if (!response.ok) return;
 
-    // 2. Read as text first to verify it's not empty or cut off
     const rawText = await response.text();
-    if (!rawText || rawText.length < 100) {
-      console.log("Incomplete data received from NVD. Skipping this cycle.");
-      return;
-    }
+    if (!rawText || rawText.length < 100) return;
 
     try {
       const data = JSON.parse(rawText);
@@ -117,7 +107,8 @@ const currentRows = (countResult.total || 0) + 60000;
       
       for (const item of vulnerabilities) {
         const cve = item.cve;
-        const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 0;
+        const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 
+                      cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 0;
         
         statements.push(env.DB.prepare("INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)").bind(cve.id, score, cve.descriptions[0].value));
         
@@ -137,10 +128,10 @@ const currentRows = (countResult.total || 0) + 60000;
       
       if (statements.length > 0) {
         await env.DB.batch(statements);
-        console.log(`Successfully added 100 rows. New total: ${currentRows + 100}`);
+        console.log(`Successfully added ${vulnerabilities.length} rows. Start Index was: ${currentRows}`);
       }
     } catch (e) {
-      console.log("JSON was malformed. NVD server likely cut the connection early.");
+      console.log("JSON Parse Error: Connection was likely interrupted.");
     }
   }
 };
