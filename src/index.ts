@@ -86,7 +86,7 @@ export default {
     const currentRows = countResult.total || 0;
     
     // Using 100 rows for high stability on Index 0
-    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=500&startIndex=" + currentRows;
+    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=100&startIndex=" + currentRows;
     
     const response = await fetch(nvdUrl, { 
       headers: { 
