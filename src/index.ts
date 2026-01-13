@@ -81,12 +81,12 @@ export default {
   },
 
   async scheduled(event, env) {
-    // START FROM BEGINNING: Asking the DB for the current total
     const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
+    // CLEAN START: Automatically starts at 0 if the table is empty
     const currentRows = countResult.total || 0;
     
-    // Using 500 rows per batch for faster progress while quota is fresh
-    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=500&startIndex=" + currentRows;
+    // Using 100 rows for high stability on Index 0
+    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=100&startIndex=" + currentRows;
     
     const response = await fetch(nvdUrl, { 
       headers: { 
@@ -128,10 +128,10 @@ export default {
       
       if (statements.length > 0) {
         await env.DB.batch(statements);
-        console.log(`Successfully added ${vulnerabilities.length} rows. Start Index was: ${currentRows}`);
+        console.log(`Added batch starting at index: ${currentRows}`);
       }
     } catch (e) {
-      console.log("JSON Parse Error: Connection was likely interrupted.");
+      console.log("JSON Parse Error: Possible network interruption.");
     }
   }
 };
