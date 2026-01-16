@@ -1,8 +1,14 @@
 {
-	"compatibility_date": "2025-10-08",
-	"main": "src/index.ts",
+	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "icsvulscore",
-	"upload_source_maps": true,
+	"main": "src/index.ts",
+	"compatibility_date": "2025-10-08",
+	"triggers": {
+		"crons": [
+			"*/30 * * * *",
+			"0 0 */2 * *"
+		]
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
@@ -12,5 +18,6 @@
 	],
 	"observability": {
 		"enabled": true
-	}
+	},
+	"upload_source_maps": true
 }
