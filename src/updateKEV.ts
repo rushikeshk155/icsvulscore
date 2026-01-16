@@ -1,27 +1,37 @@
-// src/updateKEV.ts
 export async function syncKevData(env: any) {
-  console.log("Starting KEV sync...");
+  const KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
+  
   try {
-    const response = await fetch("https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json");
-    const data: any = await response.json();
+    const res = await fetch(KEV_URL);
+    const data: any = await res.json();
     const vulnerabilities = data.vulnerabilities || [];
 
+    // Map all ~1,500 records
     const statements = vulnerabilities.map((v: any) => {
       return env.DB.prepare(`
         INSERT OR REPLACE INTO cisa_kev (
           cve_id, vendor_project, product, vulnerability_name, 
-          date_added, short_description, required_action, due_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          date_added, short_description, required_action, 
+          due_date, known_ransomware_campaign_use
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
-        v.cveID, v.vendorProject, v.product, v.vulnerabilityName, 
-        v.dateAdded, v.shortDescription, v.requiredAction, v.dueDate
+        v.cveID, 
+        v.vendorProject, 
+        v.product, 
+        v.vulnerabilityName, 
+        v.dateAdded, 
+        v.shortDescription, 
+        v.requiredAction, 
+        v.dueDate, 
+        v.knownRansomwareCampaignUse
       );
     });
 
-    // Execute 1,500+ records in a single D1 batch transaction
+    // Execute in one batch
     await env.DB.batch(statements);
-    console.log(`KEV sync complete: ${vulnerabilities.length} records processed.`);
-  } catch (e) {
-    console.error("KEV Sync Error:", e);
+    console.log(`Successfully synced ${vulnerabilities.length} KEV records.`);
+    
+  } catch (err) {
+    console.error("KEV Sync Error:", err);
   }
 }
