@@ -1,137 +1,52 @@
+// src/index.ts
+import { fetchAndStoreNVD } from "./fetchNVD_data";
+import { syncKevData } from "./updateKEV";
+
 export default {
-  async fetch(request, env) {
+  // 1. DASHBOARD & API
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // 1. DASHBOARD UI
+    // Dashboard UI logic... (your existing HTML code here)
     if (url.pathname === "/" && request.method === "GET" && !url.searchParams.has("make")) {
-      return new Response(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <title>ICS Risk Dashboard</title>
-          <style>
-            body { font-family: system-ui; max-width: 800px; margin: 40px auto; padding: 20px; background: #f4f7f9; }
-            .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-            input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; }
-            button { width: 100%; background: #1a73e8; color: white; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
-            #results { margin-top: 30px; display: none; }
-            .score-box { text-align: center; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-            .critical { background: #fee2e2; color: #991b1b; border: 1px solid #f87171; }
-            .safe { background: #dcfce7; color: #166534; border: 1px solid #4ade80; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { text-align: left; padding: 12px; border-bottom: 1px solid #eee; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h2>🛡️ ICS Asset Vulnerability Search</h2>
-            <input type="text" id="make" placeholder="Vendor (e.g., Siemens)">
-            <input type="text" id="model" placeholder="Model (e.g., S7-1500)">
-            <button onclick="runSearch()">Search Risk</button>
-            <div id="results">
-              <div id="scoreBox" class="score-box"></div>
-              <h3>Recent CVEs</h3>
-              <table>
-                <thead><tr><th>CVE ID</th><th>Score</th></tr></thead>
-                <tbody id="cveList"></tbody>
-              </table>
-            </div>
-          </div>
-          <script>
-            async function runSearch() {
-              const make = document.getElementById('make').value;
-              const model = document.getElementById('model').value;
-              const res = await fetch(\`?make=\${make}&model=\${model}\`);
-              const data = await res.json();
-              document.getElementById('results').style.display = 'block';
-              const sBox = document.getElementById('scoreBox');
-              sBox.className = 'score-box ' + (data.max_cvss >= 7 ? 'critical' : 'safe');
-              sBox.innerHTML = 'Max CVSS Score: <h1>' + data.max_cvss + '</h1>';
-              document.getElementById('cveList').innerHTML = data.vulnerabilities.map(v => 
-                '<tr><td>' + v.cve_id + '</td><td>' + v.cvss_score + '</td></tr>').join('');
-            }
-          </script>
-        </body>
-        </html>
-      `, { headers: { "Content-Type": "text/html" } });
+        // ... (return HTML Dashboard)
     }
 
-    // 2. SEARCH API
+    // Search API...
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
     if (make && model) {
-      const data = await env.DB.prepare("SELECT c.cve_id, c.cvss_score FROM cves c JOIN cve_cpe_mapping m ON c.cve_id = m.cve_id WHERE m.make LIKE ? AND m.model LIKE ? ORDER BY c.cvss_score DESC")
-        .bind("%" + make.toLowerCase() + "%", "%" + model.toLowerCase() + "%").all();
-      const maxScore = data.results.length > 0 ? Math.max(...data.results.map(r => r.cvss_score)) : 0;
+      const data = await env.DB.prepare(`
+        SELECT c.cve_id, c.cvss_score 
+        FROM cves c 
+        JOIN cve_cpe_mapping m ON c.cve_id = m.cve_id 
+        WHERE m.make LIKE ? AND m.model LIKE ? 
+        ORDER BY c.cvss_score DESC
+      `).bind("%" + make.toLowerCase() + "%", "%" + model.toLowerCase() + "%").all();
+      
+      const maxScore = data.results.length > 0 ? Math.max(...data.results.map((r:any) => r.cvss_score)) : 0;
       return Response.json({ max_cvss: maxScore, vulnerabilities: data.results });
     }
 
-    // 3. MANUAL SYNC TRIGGER
-    if (url.pathname === "/sync") {
-      try {
-        await this.scheduled(null, env);
-        return new Response("Sync completed! Refresh your database count.");
-      } catch (err) {
-        return new Response("Sync Failed: " + err.message, { status: 500 });
-      }
+    // Manual Trigger for testing
+    if (url.pathname === "/sync-kev") {
+       ctx.waitUntil(syncKevData(env));
+       return new Response("KEV Sync triggered in background.");
     }
 
-    return new Response("Dashboard at / | Sync at /sync");
+    return new Response("Dashboard at /");
   },
 
-  async scheduled(event, env) {
-    const countResult = await env.DB.prepare("SELECT COUNT(*) as total FROM cves").first();
-    // CLEAN START: Automatically starts at 0 if the table is empty
-    const currentRows = countResult.total || 0;
-    
-    // Using 100 rows for high stability on Index 0
-    const nvdUrl = "https://services.nvd.nist.gov/rest/json/cves/2.0/?resultsPerPage=500&startIndex=" + currentRows;
-    
-    const response = await fetch(nvdUrl, { 
-      headers: { 
-        "apiKey": env.NVD_API_KEY, 
-        "User-Agent": "Cloudflare-Worker-ICS-PoC" 
-      } 
-    });
+  // 2. CRON TRIGGERS
+  async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
+    switch (controller.cron) {
+      case "*/30 * * * *": // Every 30 mins
+        ctx.waitUntil(fetchAndStoreNVD(env));
+        break;
 
-    if (!response.ok) return;
-
-    const rawText = await response.text();
-    if (!rawText || rawText.length < 100) return;
-
-    try {
-      const data = JSON.parse(rawText);
-      const vulnerabilities = data.vulnerabilities || [];
-      const statements = [];
-      
-      for (const item of vulnerabilities) {
-        const cve = item.cve;
-        const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 
-                      cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 0;
-        
-        statements.push(env.DB.prepare("INSERT OR REPLACE INTO cves (cve_id, cvss_score, description) VALUES (?, ?, ?)").bind(cve.id, score, cve.descriptions[0].value));
-        
-        if (cve.configurations) {
-          for (const config of cve.configurations) {
-            for (const node of (config.nodes || [])) {
-              for (const match of (node.cpeMatch || [])) {
-                const p = match.criteria.split(':');
-                if (p.length > 5) {
-                  statements.push(env.DB.prepare("INSERT INTO cve_cpe_mapping (cve_id, part, make, model, firmware, cpe_full) VALUES (?, ?, ?, ?, ?, ?)").bind(cve.id, p[2], p[3], p[4], p[5], match.criteria));
-                }
-              }
-            }
-          }
-        }
-      }
-      
-      if (statements.length > 0) {
-        await env.DB.batch(statements);
-        console.log(`Added batch starting at index: ${currentRows}`);
-      }
-    } catch (e) {
-      console.log("JSON Parse Error: Possible network interruption.");
+      case "0 0 */2 * *": // Every 2 days
+        ctx.waitUntil(syncKevData(env));
+        break;
     }
   }
 };
