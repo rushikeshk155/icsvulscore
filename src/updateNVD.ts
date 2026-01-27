@@ -1,30 +1,39 @@
 /**
  * Incremental NVD Sync Script
- * This function fetches CVEs modified in the last 25 hours.
- * It populates the 'last_modified' column and refreshes 'cve_cpe_mapping'.
+ * This version uses the strict ISO-8601 format required by NIST 
+ * to prevent 404 errors.
  */
 
 export async function updateNVDIncremental(env: any) {
   const now = new Date();
-  // Look back 25 hours to ensure a small overlap so no records are missed
+  // NIST API range cannot exceed 120 days. We use 25 hours for daily overlap.
   const yesterday = new Date(now.getTime() - (25 * 60 * 60 * 1000));
   
-  // Format dates to ISO-8601 without milliseconds for the NVD API
-  const start = yesterday.toISOString().split('.')[0]; 
-  const end = now.toISOString().split('.')[0];
+  /**
+   * NIST REQUIREMENT: Extended ISO-8601 format
+   * Format: [YYYY]-[MM]-[DD]T[HH]:[MM]:[SS].000Z
+   * We use .toISOString() and split/replace to ensure no hidden 
+   * milliseconds or incorrect characters cause a 404.
+   */
+  const start = yesterday.toISOString().split('.')[0] + ".000Z"; 
+  const end = now.toISOString().split('.')[0] + ".000Z";
 
-  // includeMatchStringChange=true ensures we catch updates to software product names
-  const url = `https://services.nvd.nist.gov/rest/json/cves/2.0/?lastModStartDate=${start}&lastModEndDate=${end}&includeMatchStringChange=true`;
+  // Both start and end parameters are REQUIRED when filtering by date.
+  const url = `https://services.nvd.nist.gov/rest/json/cves/2.0/?lastModStartDate=${start}&lastModEndDate=${end}`;
   
   try {
-    console.log(`Starting Incremental Sync from ${start} to ${end}`);
+    console.log(`Fetching updates from: ${start} to ${end}`);
     
     const res = await fetch(url, { 
-      headers: { "apiKey": env.NVD_API_KEY } // Using your stored secret key
+      headers: { 
+        "apiKey": env.NVD_API_KEY,
+        "User-Agent": "Cloudflare-Worker-CVE-Sync" // Good practice to identify your bot
+      } 
     });
     
     if (!res.ok) {
-      throw new Error(`NVD API responded with status: ${res.status}`);
+      // Log the specific status to help debug (e.g., 403 for key issues, 404 for date issues)
+      throw new Error(`NVD API Error: ${res.status} - ${res.statusText}`);
     }
     
     const data: any = await res.json();
@@ -34,39 +43,36 @@ export async function updateNVDIncremental(env: any) {
     for (const v of vulnerabilities) {
       const cve = v.cve;
       
-      // Extract CVSS score from the most recent metric version available
+      // Extraction logic for CVSS scores
       const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 
                     cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 
                     cve.metrics?.cvssMetricV2?.[0]?.cvssData?.baseScore || null;
 
-      // 1. Update the main CVE table including the lastModified field from API
+      const desc = cve.descriptions?.find((d: any) => d.lang === 'en')?.value || "";
+
+      // 1. Update CVE table and populate the last_modified column
       statements.push(env.DB.prepare(`
         INSERT OR REPLACE INTO cves (cve_id, cvss_score, description, last_modified) 
         VALUES (?, ?, ?, ?)
       `).bind(
         cve.id, 
         score, 
-        cve.descriptions.find((d: any) => d.lang === 'en')?.value || "", 
-        cve.lastModified // THIS POPULATES THE NULL COLUMN
+        desc, 
+        cve.lastModified // NIST returns lastModified in the response
       ));
 
-      // 2. Clear old product mappings for this specific CVE
+      // 2. Clear and rebuild product mappings
       statements.push(env.DB.prepare(`DELETE FROM cve_cpe_mapping WHERE cve_id = ?`).bind(cve.id));
 
-      // 3. Process the updated Configurations (CPE Mappings)
       if (cve.configurations) {
         cve.configurations.forEach((config: any) => {
           config.nodes?.forEach((node: any) => {
             node.cpeMatch?.forEach((match: any) => {
               const parts = match.criteria.split(':');
-              // Extract make (vendor) and model (product) from the CPE string
               if (parts.length >= 5) {
-                const make = parts[3].toLowerCase();
-                const model = parts[4].toLowerCase();
-                
                 statements.push(env.DB.prepare(`
                   INSERT INTO cve_cpe_mapping (cve_id, make, model) VALUES (?, ?, ?)
-                `).bind(cve.id, make, model));
+                `).bind(cve.id, parts[3].toLowerCase(), parts[4].toLowerCase()));
               }
             });
           });
@@ -74,14 +80,15 @@ export async function updateNVDIncremental(env: any) {
       }
     }
 
-    // Execute all changes as a single atomic batch transaction
     if (statements.length > 0) {
+      // Execute as a batch to stay within D1 execution limits
       await env.DB.batch(statements);
-      console.log(`Successfully processed ${vulnerabilities.length} CVE updates.`);
+      console.log(`Successfully updated ${vulnerabilities.length} CVEs.`);
     } else {
-      console.log("No updates found for this period.");
+      console.log("No new updates found for this time range.");
     }
+
   } catch (err) {
-    console.error("Incremental Sync failed:", err);
+    console.error("Incremental Sync Process Failed:", err);
   }
 }
