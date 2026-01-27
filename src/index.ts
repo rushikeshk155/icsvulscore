@@ -1,4 +1,4 @@
-// src/index.ts
+/* src/index.ts
 import { fetchAndStoreNVD } from "./fetchNVD_data";
 import { syncKevData } from "./updateKEV";
 
@@ -35,16 +35,38 @@ export default {
     }
 
     return new Response("Dashboard at /");
+  }, */
+
+// 2. CRON TRIGGERS
+  //async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
+    //switch (controller.cron) {
+     // case "*/30 * * * *":
+       // ctx.waitUntil(fetchAndStoreNVD(env));
+        //break;
+
+      //case "0 0 */2 * *": // Every 2 days
+        //ctx.waitUntil(syncKevData(env));
+        //break;
+    //}
+  //}
+//}; 
+
+
+import { updateNVDIncremental } from "./updateNVD";
+import { syncKevData } from "./updateKEV";
+
+export default {
+  async fetch(request, env, ctx) {
+    // Keep your search and manual trigger routes here...
+    return new Response("Dashboard at /");
   },
 
-  // 2. CRON TRIGGERS
-  async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
+  async scheduled(controller, env, ctx) {
     switch (controller.cron) {
-      case "*/30 * * * *": // Every 30 mins
-        ctx.waitUntil(fetchAndStoreNVD(env));
+      case "0 0 * * *": // Runs daily at midnight
+        ctx.waitUntil(updateNVDIncremental(env));
         break;
-
-      case "0 0 */2 * *": // Every 2 days
+      case "0 0 */2 * *": // KEV sync every 2 days
         ctx.waitUntil(syncKevData(env));
         break;
     }
