@@ -1,12 +1,15 @@
 /**
- * Incremental NVD Sync Script
- * Optimized to prevent Cloudflare Worker timeouts.
+ * Optimized NVD Sync Script
+ * Focus: Updating 'cves' table details and 'last_modified' column only.
+ * Strategy: Sequential chunking to prevent D1 CPU timeouts.
  */
 
 export async function updateNVDIncremental(env: any) {
   const now = new Date();
+  // Look back 25 hours for a daily update with a small safety overlap
   const yesterday = new Date(now.getTime() - (25 * 60 * 60 * 1000));
   
+  // NIST strict ISO-8601 format: YYYY-MM-DDTHH:MM:SS.000Z
   const start = yesterday.toISOString().split('.')[0] + ".000Z"; 
   const end = now.toISOString().split('.')[0] + ".000Z";
 
@@ -17,12 +20,12 @@ export async function updateNVDIncremental(env: any) {
     
     const res = await fetch(url, { 
       headers: { 
-        "apiKey": env.NVD_API_KEY,
+        "apiKey": env.NVD_API_KEY || "",
         "User-Agent": "Cloudflare-Worker-CVE-Sync"
       } 
     });
     
-    if (!res.ok) throw new Error(`NVD API Error: ${res.status}`);
+    if (!res.ok) throw new Error(`NVD API responded with status: ${res.status}`);
     
     const data: any = await res.json();
     const vulnerabilities = data.vulnerabilities || [];
@@ -36,50 +39,41 @@ export async function updateNVDIncremental(env: any) {
 
     for (const v of vulnerabilities) {
       const cve = v.cve;
-      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 
-                    cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 
-                    cve.metrics?.cvssMetricV2?.[0]?.cvssData?.baseScore || null;
+      
+      // Extract CVSS score from the most recent metric version available
+      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore ?? 
+                    cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore ?? 
+                    cve.metrics?.cvssMetricV2?.[0]?.cvssData?.baseScore ?? null;
 
-      // 1. Update CVE table - Mapping lastModified to last_modified column
+      // Extract English description
+      const desc = cve.descriptions?.find((d: any) => d.lang === 'en')?.value ?? "";
+
+      // Prepare update for the 'cves' table only
+      // This maps 'cve.lastModified' from the API to your 'last_modified' column
       statements.push(env.DB.prepare(`
         INSERT OR REPLACE INTO cves (cve_id, cvss_score, description, last_modified) 
         VALUES (?, ?, ?, ?)
       `).bind(
         cve.id, 
         score, 
-        cve.descriptions?.find((d: any) => d.lang === 'en')?.value || "", 
-        cve.lastModified || null
+        desc, 
+        cve.lastModified // This populates the NULL column
       ));
-
-      // 2. Clear old product mappings
-      statements.push(env.DB.prepare(`DELETE FROM cve_cpe_mapping WHERE cve_id = ?`).bind(cve.id));
-
-      // 3. Rebuild product mappings
-      if (cve.configurations) {
-        cve.configurations.forEach((config: any) => {
-          config.nodes?.forEach((node: any) => {
-            node.cpeMatch?.forEach((match: any) => {
-              const parts = match.criteria.split(':');
-              if (parts.length >= 5) {
-                statements.push(env.DB.prepare(`
-                  INSERT INTO cve_cpe_mapping (cve_id, make, model) VALUES (?, ?, ?)
-                `).bind(cve.id, parts[3].toLowerCase(), parts[4].toLowerCase()));
-              }
-            });
-          });
-        });
-      }
     }
 
-    // Execute in chunks if there are many updates to avoid timeouts
-    if (statements.length > 0) {
-      console.log(`Sending ${statements.length} SQL statements to D1...`);
-      await env.DB.batch(statements);
-      console.log(`Successfully updated ${vulnerabilities.length} CVEs.`);
+    // Process in chunks of 50 to stay safely under D1 CPU limits
+    const CHUNK_SIZE = 50;
+    console.log(`Updating ${vulnerabilities.length} CVE records in chunks...`);
+
+    for (let i = 0; i < statements.length; i += CHUNK_SIZE) {
+      const chunk = statements.slice(i, i + CHUNK_SIZE);
+      await env.DB.batch(chunk); // Awaiting each small batch prevents CPU timeout
     }
+
+    console.log("Incremental update of 'last_modified' column completed successfully.");
 
   } catch (err) {
-    console.error("Incremental Sync Process Failed:", err);
-    throw err; // Re-throw so the Fetch handler knows it failed
+    console.error("Update failed:", err);
+    throw err;
   }
 }
