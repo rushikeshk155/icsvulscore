@@ -1,40 +1,39 @@
 /**
- * Comprehensive NVD Backfill Script
- * Target: Safely populate historical 'last_modified' timestamps.
- * Measures: 2s sleep (API safety) + Chunking (DB safety).
+ * Yearly Backfill Script
+ * Designed to heal the NULL gaps year-by-year without hitting CPU limits.
  */
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function backfillNVD(env: any) {
-  // NIST API allows max 120 days per request.
-  // We'll move backward in 30-day windows to keep data sizes manageable.
-  const TOTAL_DAYS_TO_BACKFILL = 365; // Set this to your desired range (e.g., 365 or 3650)
-  const WINDOW_SIZE = 30;
+  // CONFIGURATION: Change the year here to target specific gaps from your screenshot
+  const TARGET_YEAR = 2025; 
+  const WINDOW_SIZE_DAYS = 30; // 30-day windows are safer for D1
 
-  console.log(`Starting Safety-First Backfill for ${TOTAL_DAYS_TO_BACKFILL} days...`);
+  console.log(`Starting Backfill for Year: ${TARGET_YEAR}`);
 
-  for (let offset = 0; offset < TOTAL_DAYS_TO_BACKFILL; offset += WINDOW_SIZE) {
-    const end = new Date(Date.now() - (offset * 24 * 60 * 60 * 1000));
-    const start = new Date(end.getTime() - (WINDOW_SIZE * 24 * 60 * 60 * 1000));
+  // We loop through the year in 30-day chunks
+  for (let month = 0; month < 12; month++) {
+    const start = new Date(TARGET_YEAR, month, 1);
+    const end = new Date(TARGET_YEAR, month + 1, 0);
 
     const startISO = start.toISOString().split('.')[0] + ".000Z";
     const endISO = end.toISOString().split('.')[0] + ".000Z";
 
-    console.log(`>>> Window: ${startISO} to ${endISO}`);
+    console.log(`>>> Healing Window: ${startISO} to ${endISO}`);
 
     const url = `https://services.nvd.nist.gov/rest/json/cves/2.0/?lastModStartDate=${startISO}&lastModEndDate=${endISO}`;
     
     try {
-      // 1. NIST Rate Limit Precaution: Wait 2 seconds before every fetch
-      await sleep(2000);
+      // PRECAUTION 1: NIST Rate Limit
+      await sleep(2000); 
 
       const res = await fetch(url, { 
         headers: { "apiKey": env.NVD_API_KEY || "" } 
       });
 
       if (!res.ok) {
-        console.error(`Skipping window due to API error ${res.status}`);
+        console.error(`NVD API error for ${startISO}: ${res.status}`);
         continue;
       }
 
@@ -48,7 +47,7 @@ export async function backfillNVD(env: any) {
         const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore ?? 
                       cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore ?? null;
 
-        // Use UPDATE instead of INSERT OR REPLACE to be even safer
+        // PRECAUTION 2: SQL Update only (Safe for large DBs)
         statements.push(env.DB.prepare(`
           UPDATE cves 
           SET cvss_score = ?, description = ?, last_modified = ? 
@@ -61,18 +60,18 @@ export async function backfillNVD(env: any) {
         ));
       }
 
-      // 2. D1 CPU Precaution: Process in very small chunks
+      // PRECAUTION 3: Small DB chunks
       const CHUNK_SIZE = 40; 
       for (let i = 0; i < statements.length; i += CHUNK_SIZE) {
         const chunk = statements.slice(i, i + CHUNK_SIZE);
-        await env.DB.batch(chunk); // Sequential batching prevents reset
+        await env.DB.batch(chunk);
       }
       
-      console.log(`Window success: Updated ${vulnerabilities.length} records.`);
+      console.log(`Window success: Healed ${vulnerabilities.length} records.`);
 
     } catch (err) {
-      console.error(`Fatal error in window ${startISO}:`, err);
+      console.error(`Backfill failed for window ${startISO}:`, err);
     }
   }
-  console.log("Full backfill process finished.");
+  console.log(`Backfill for ${TARGET_YEAR} completed.`);
 }
