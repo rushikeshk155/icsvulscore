@@ -1,9 +1,15 @@
 /*
   ===========================================================
-  HISTORICAL REFERENCE: OLD BULK SYNC LOGIC (DEPRECATED)
+  DEPRECATED: PREVIOUS BULK SYNC LOGIC
   ===========================================================
+  This section is kept for historical reference only. 
+  Note: Avoid using raw cron strings like stars in comments 
+  to prevent build errors.
+
   import { fetchAndStoreNVD } from "./fetchNVD_data";
-  // case "*/30 * * * *": ctx.waitUntil(fetchAndStoreNVD(env));
+  
+  // Logic previously triggered every 30 minutes:
+  // ctx.waitUntil(fetchAndStoreNVD(env));
   ===========================================================
 */
 
@@ -11,6 +17,10 @@ import { updateNVDIncremental } from "./updateNVD";
 import { syncKevData } from "./updateKEV";
 
 export default {
+  /**
+   * 1. FETCH HANDLER
+   * Powers the Dashboard UI and the Search API.
+   */
   async fetch(request: Request, env: any, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
@@ -34,10 +44,15 @@ export default {
       return Response.json({ 
         max_cvss: maxScore, 
         vulnerabilities: data.results 
+      }, {
+        headers: { 
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "application/json" 
+        }
       });
     }
 
-    // --- MANUAL TEST TRIGGERS ---
+    // --- MANUAL TRIGGERS (For Testing) ---
     if (url.pathname === "/sync-kev") {
       ctx.waitUntil(syncKevData(env));
       return new Response("KEV Sync triggered.");
@@ -50,7 +65,15 @@ export default {
 
     // --- DASHBOARD UI ---
     if (url.pathname === "/") {
-      return new Response("<h1>Vulnerability Dashboard</h1><p>Active with Incremental Updates.</p>", {
+      return new Response(`
+        <html>
+          <body style="font-family: sans-serif; padding: 20px;">
+            <h1>Vulnerability Dashboard</h1>
+            <p>Status: Active and Monitoring</p>
+            <p>Search using: <code>/?make=vendor&model=product</code></p>
+          </body>
+        </html>
+      `, {
         headers: { "Content-Type": "text/html" }
       });
     }
@@ -58,14 +81,24 @@ export default {
     return new Response("Not Found", { status: 404 });
   },
 
+  /**
+   * 2. SCHEDULED HANDLER (CRON JOBS)
+   * Automatically triggered by Cloudflare's edge scheduler.
+   */
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
     switch (controller.cron) {
-      case "0 0 * * *": // Daily NVD Update
+      case "0 0 * * *": // Matches Daily Trigger
+        console.log("Cron Trigger: Starting Daily Incremental NVD Sync...");
         ctx.waitUntil(updateNVDIncremental(env));
         break;
-      case "0 0 */2 * *": // Bi-Daily KEV Update
+
+      case "0 0 */2 * *": // Matches Bi-Daily Trigger
+        console.log("Cron Trigger: Starting KEV Sync...");
         ctx.waitUntil(syncKevData(env));
         break;
+      
+      default:
+        console.log(`Cron Trigger: No action defined for schedule: ${controller.cron}`);
     }
   }
 };
