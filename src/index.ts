@@ -19,7 +19,7 @@ import { syncKevData } from "./updateKEV";
 export default {
   /**
    * 1. FETCH HANDLER
-   * Powers the Dashboard UI and the Search API.
+   * Handles API requests, Dashboard UI, and Manual Sync Triggers.
    */
   async fetch(request: Request, env: any, ctx: ExecutionContext) {
     const url = new URL(request.url);
@@ -52,15 +52,24 @@ export default {
       });
     }
 
-    // --- MANUAL TRIGGERS (For Testing) ---
+    // --- MANUAL TRIGGERS (Awaited to prevent Task Cancellation) ---
     if (url.pathname === "/sync-kev") {
-      ctx.waitUntil(syncKevData(env));
-      return new Response("KEV Sync triggered.");
+      try {
+        await syncKevData(env);
+        return new Response("KEV Sync completed successfully.");
+      } catch (e: any) {
+        return new Response("KEV Sync failed: " + e.message, { status: 500 });
+      }
     }
 
     if (url.pathname === "/sync-incremental") {
-      ctx.waitUntil(updateNVDIncremental(env));
-      return new Response("Incremental NVD Sync triggered.");
+      try {
+        // We AWAIT this so the browser connection stays open until D1 is updated
+        await updateNVDIncremental(env);
+        return new Response("Incremental NVD Sync completed successfully.");
+      } catch (e: any) {
+        return new Response("NVD Sync failed: " + e.message, { status: 500 });
+      }
     }
 
     // --- DASHBOARD UI ---
@@ -69,8 +78,8 @@ export default {
         <html>
           <body style="font-family: sans-serif; padding: 20px;">
             <h1>Vulnerability Dashboard</h1>
-            <p>Status: Active and Monitoring</p>
-            <p>Search using: <code>/?make=vendor&model=product</code></p>
+            <p>Status: Active</p>
+            <p>Manual Sync: <a href="/sync-incremental">Trigger NVD Sync</a></p>
           </body>
         </html>
       `, {
@@ -83,22 +92,19 @@ export default {
 
   /**
    * 2. SCHEDULED HANDLER (CRON JOBS)
-   * Automatically triggered by Cloudflare's edge scheduler.
+   * These run in the background via Cloudflare's edge scheduler.
    */
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
     switch (controller.cron) {
-      case "0 0 * * *": // Matches Daily Trigger
-        console.log("Cron Trigger: Starting Daily Incremental NVD Sync...");
+      case "0 0 * * *": // Daily NVD Update
+        console.log("Cron Trigger: Starting Daily NVD Sync...");
         ctx.waitUntil(updateNVDIncremental(env));
         break;
 
-      case "0 0 */2 * *": // Matches Bi-Daily Trigger
+      case "0 0 */2 * *": // Bi-Daily KEV Update
         console.log("Cron Trigger: Starting KEV Sync...");
         ctx.waitUntil(syncKevData(env));
         break;
-      
-      default:
-        console.log(`Cron Trigger: No action defined for schedule: ${controller.cron}`);
     }
   }
 };
