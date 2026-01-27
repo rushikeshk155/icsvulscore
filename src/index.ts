@@ -1,25 +1,15 @@
-/*
-  ===========================================================
-  DEPRECATED: PREVIOUS BULK SYNC LOGIC
-  ===========================================================
-  This section is kept for historical reference only. 
-  Note: Avoid using raw cron strings like stars in comments 
-  to prevent build errors.
-
-  import { fetchAndStoreNVD } from "./fetchNVD_data";
-  
-  // Logic previously triggered every 30 minutes:
-  // ctx.waitUntil(fetchAndStoreNVD(env));
-  ===========================================================
-*/
+/**
+ * ICS Vuln Score - Main Worker Handler
+ * Features: Search API, Daily Incremental Sync, and Long-Running Backfill.
+ */
 
 import { updateNVDIncremental } from "./updateNVD";
+import { backfillNVD } from "./backfillNVD";
 import { syncKevData } from "./updateKEV";
 
 export default {
   /**
-   * 1. FETCH HANDLER
-   * Handles API requests, Dashboard UI, and Manual Sync Triggers.
+   * 1. FETCH HANDLER: API and Manual Triggers
    */
   async fetch(request: Request, env: any, ctx: ExecutionContext) {
     const url = new URL(request.url);
@@ -37,72 +27,59 @@ export default {
         ORDER BY c.cvss_score DESC
       `).bind("%" + make.toLowerCase() + "%", "%" + model.toLowerCase() + "%").all();
       
-      const maxScore = data.results.length > 0 
-        ? Math.max(...data.results.map((r: any) => r.cvss_score || 0)) 
-        : 0;
-
       return Response.json({ 
-        max_cvss: maxScore, 
+        count: data.results.length,
         vulnerabilities: data.results 
       }, {
-        headers: { 
-          "Access-Control-Allow-Origin": "*",
-          "Content-Type": "application/json" 
-        }
+        headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" }
       });
     }
 
-    // --- MANUAL TRIGGERS (Awaited to prevent Task Cancellation) ---
-    if (url.pathname === "/sync-kev") {
-      try {
-        await syncKevData(env);
-        return new Response("KEV Sync completed successfully.");
-      } catch (e: any) {
-        return new Response("KEV Sync failed: " + e.message, { status: 500 });
-      }
-    }
-
+    // --- MANAUL SYNC: Incremental (Quick) ---
     if (url.pathname === "/sync-incremental") {
       try {
-        // We AWAIT this so the browser connection stays open until D1 is updated
         await updateNVDIncremental(env);
-        return new Response("Incremental NVD Sync completed successfully.");
+        return new Response("Daily Incremental Sync completed successfully.");
       } catch (e: any) {
-        return new Response("NVD Sync failed: " + e.message, { status: 500 });
+        return new Response(`Sync failed: ${e.message}`, { status: 500 });
       }
     }
 
-    // --- DASHBOARD UI ---
-    if (url.pathname === "/") {
-      return new Response(`
-        <html>
-          <body style="font-family: sans-serif; padding: 20px;">
-            <h1>Vulnerability Dashboard</h1>
-            <p>Status: Active</p>
-            <p>Manual Sync: <a href="/sync-incremental">Trigger NVD Sync</a></p>
-          </body>
-        </html>
-      `, {
-        headers: { "Content-Type": "text/html" }
-      });
+    // --- MANUAL SYNC: Backfill (Long-Running) ---
+    if (url.pathname === "/backfill-execute") {
+      // Use await to prevent task cancellation for this critical job
+      try {
+        await backfillNVD(env);
+        return new Response("Full Backfill process finished. Check D1 for results.");
+      } catch (e: any) {
+        return new Response(`Backfill Error: ${e.message}`, { status: 500 });
+      }
     }
 
-    return new Response("Not Found", { status: 404 });
+    // --- DATABASE HEALTH CHECK ---
+    if (url.pathname === "/health") {
+      const stats = await env.DB.prepare(`
+        SELECT COUNT(*) as total, COUNT(last_modified) as healed FROM cves
+      `).first();
+      return Response.json(stats);
+    }
+
+    return new Response("ICS Vuln Score API is Active. Use /backfill-execute to begin healing.", {
+      headers: { "Content-Type": "text/plain" }
+    });
   },
 
   /**
-   * 2. SCHEDULED HANDLER (CRON JOBS)
-   * These run in the background via Cloudflare's edge scheduler.
+   * 2. SCHEDULED HANDLER: Automated Maintenance
    */
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
     switch (controller.cron) {
-      case "0 0 * * *": // Daily NVD Update
-        console.log("Cron Trigger: Starting Daily NVD Sync...");
+      case "0 0 * * *": 
+        console.log("Daily Maintenance: Running Incremental NVD Sync...");
         ctx.waitUntil(updateNVDIncremental(env));
         break;
-
-      case "0 0 */2 * *": // Bi-Daily KEV Update
-        console.log("Cron Trigger: Starting KEV Sync...");
+      case "0 0 */2 * *":
+        console.log("Bi-Daily Maintenance: Running KEV Sync...");
         ctx.waitUntil(syncKevData(env));
         break;
     }
