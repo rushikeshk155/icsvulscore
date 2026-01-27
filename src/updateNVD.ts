@@ -1,18 +1,31 @@
+/**
+ * Incremental NVD Sync Script
+ * This function fetches CVEs modified in the last 25 hours.
+ * It populates the 'last_modified' column and refreshes 'cve_cpe_mapping'.
+ */
+
 export async function updateNVDIncremental(env: any) {
   const now = new Date();
+  // Look back 25 hours to ensure a small overlap so no records are missed
   const yesterday = new Date(now.getTime() - (25 * 60 * 60 * 1000));
   
+  // Format dates to ISO-8601 without milliseconds for the NVD API
   const start = yesterday.toISOString().split('.')[0]; 
   const end = now.toISOString().split('.')[0];
 
+  // includeMatchStringChange=true ensures we catch updates to software product names
   const url = `https://services.nvd.nist.gov/rest/json/cves/2.0/?lastModStartDate=${start}&lastModEndDate=${end}&includeMatchStringChange=true`;
   
   try {
+    console.log(`Starting Incremental Sync from ${start} to ${end}`);
+    
     const res = await fetch(url, { 
-      headers: { "apiKey": env.NVD_API_KEY || "" } 
+      headers: { "apiKey": env.NVD_API_KEY } // Using your stored secret key
     });
     
-    if (!res.ok) throw new Error(`NVD API error: ${res.status}`);
+    if (!res.ok) {
+      throw new Error(`NVD API responded with status: ${res.status}`);
+    }
     
     const data: any = await res.json();
     const vulnerabilities = data.vulnerabilities || [];
@@ -21,55 +34,54 @@ export async function updateNVDIncremental(env: any) {
     for (const v of vulnerabilities) {
       const cve = v.cve;
       
-      // 1. Safe CVSS Score extraction (Normalized to null if missing)
-      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore ?? 
-                    cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore ?? 
-                    cve.metrics?.cvssMetricV2?.[0]?.cvssData?.baseScore ?? null;
+      // Extract CVSS score from the most recent metric version available
+      const score = cve.metrics?.cvssMetricV31?.[0]?.cvssData?.baseScore || 
+                    cve.metrics?.cvssMetricV30?.[0]?.cvssData?.baseScore || 
+                    cve.metrics?.cvssMetricV2?.[0]?.cvssData?.baseScore || null;
 
-      // 2. Safe Description extraction
-      const desc = cve.descriptions?.find((d: any) => d.lang === 'en')?.value ?? "";
-
-      // 3. Main CVE Upsert (Ensuring no 'undefined' reaches .bind())
+      // 1. Update the main CVE table including the lastModified field from API
       statements.push(env.DB.prepare(`
         INSERT OR REPLACE INTO cves (cve_id, cvss_score, description, last_modified) 
         VALUES (?, ?, ?, ?)
       `).bind(
-        cve.id ?? null, 
+        cve.id, 
         score, 
-        desc, 
-        cve.lastModified ?? null
+        cve.descriptions.find((d: any) => d.lang === 'en')?.value || "", 
+        cve.lastModified // THIS POPULATES THE NULL COLUMN
       ));
 
-      // 4. Clear existing mappings to maintain atomicity
+      // 2. Clear old product mappings for this specific CVE
       statements.push(env.DB.prepare(`DELETE FROM cve_cpe_mapping WHERE cve_id = ?`).bind(cve.id));
 
-      // 5. Build new CPE Mappings
+      // 3. Process the updated Configurations (CPE Mappings)
       if (cve.configurations) {
-        for (const config of cve.configurations) {
-          for (const node of config.nodes || []) {
-            for (const match of node.cpeMatch || []) {
+        cve.configurations.forEach((config: any) => {
+          config.nodes?.forEach((node: any) => {
+            node.cpeMatch?.forEach((match: any) => {
               const parts = match.criteria.split(':');
+              // Extract make (vendor) and model (product) from the CPE string
               if (parts.length >= 5) {
+                const make = parts[3].toLowerCase();
+                const model = parts[4].toLowerCase();
+                
                 statements.push(env.DB.prepare(`
                   INSERT INTO cve_cpe_mapping (cve_id, make, model) VALUES (?, ?, ?)
-                `).bind(
-                  cve.id, 
-                  parts[3].toLowerCase(), 
-                  parts[4].toLowerCase()
-                ));
+                `).bind(cve.id, make, model));
               }
-            }
-          }
-        }
+            });
+          });
+        });
       }
     }
 
-    // 6. Execute as atomic batch
+    // Execute all changes as a single atomic batch transaction
     if (statements.length > 0) {
       await env.DB.batch(statements);
-      console.log(`Incremental update successful: ${vulnerabilities.length} CVEs.`);
+      console.log(`Successfully processed ${vulnerabilities.length} CVE updates.`);
+    } else {
+      console.log("No updates found for this period.");
     }
   } catch (err) {
-    console.error("Sync Error:", err);
+    console.error("Incremental Sync failed:", err);
   }
 }
