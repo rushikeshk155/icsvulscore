@@ -6,7 +6,6 @@ export async function syncKevData(env: any) {
     const data: any = await res.json();
     const vulnerabilities = data.vulnerabilities || [];
 
-    // Map all ~1,500 records
     const statements = vulnerabilities.map((v: any) => {
       return env.DB.prepare(`
         INSERT OR REPLACE INTO cisa_kev (
@@ -14,23 +13,11 @@ export async function syncKevData(env: any) {
           date_added, short_description, required_action, 
           due_date, known_ransomware_campaign_use
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(
-        v.cveID, 
-        v.vendorProject, 
-        v.product, 
-        v.vulnerabilityName, 
-        v.dateAdded, 
-        v.shortDescription, 
-        v.requiredAction, 
-        v.dueDate, 
-        v.knownRansomwareCampaignUse
-      );
+      `).bind(v.cveID, v.vendorProject, v.product, v.vulnerabilityName, v.dateAdded, v.shortDescription, v.requiredAction, v.dueDate, v.knownRansomwareCampaignUse);
     });
 
-    // Execute in one batch
     await env.DB.batch(statements);
-    console.log(`Successfully synced ${vulnerabilities.length} KEV records.`);
-    
+    console.log("KEV Sync complete.");
   } catch (err) {
     console.error("KEV Sync Error:", err);
   }
