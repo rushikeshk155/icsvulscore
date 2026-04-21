@@ -1,11 +1,12 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Features: Search API, Daily Incremental Sync, and Long-Running Backfill.
+ * Features: Search API, Daily Incremental Sync, Backfill, KEV Sync, and ATT&CK Library.
  */
 
 import { updateNVDIncremental } from "./updateNVD";
 import { backfillNVD } from "./backfillNVD";
 import { syncKevData } from "./updateKEV";
+import { syncAttackTechniques } from "./syncAttack"; // Task 1 Function
 
 export default {
   /**
@@ -35,7 +36,27 @@ export default {
       });
     }
 
-    // --- MANAUL SYNC: Incremental (Quick) ---
+    // --- TASK 1: MANUAL SYNC - ATT&CK Library ---
+    if (url.pathname === "/sync-attack-library") {
+      try {
+        await syncAttackTechniques(env);
+        return new Response("MITRE ATT&CK Library hydrated successfully.");
+      } catch (e: any) {
+        return new Response(`ATT&CK Sync failed: ${e.message}`, { status: 500 });
+      }
+    }
+
+    // --- TASK 2: MANUAL SYNC - CISA KEV ---
+    if (url.pathname === "/sync-kev") {
+      try {
+        await syncKevData(env);
+        return new Response("CISA KEV Table updated successfully.");
+      } catch (e: any) {
+        return new Response(`KEV Sync failed: ${e.message}`, { status: 500 });
+      }
+    }
+
+    // --- MANAUL SYNC: NVD Incremental ---
     if (url.pathname === "/sync-incremental") {
       try {
         await updateNVDIncremental(env);
@@ -47,10 +68,9 @@ export default {
 
     // --- MANUAL SYNC: Backfill (Long-Running) ---
     if (url.pathname === "/backfill-execute") {
-      // Use await to prevent task cancellation for this critical job
       try {
         await backfillNVD(env);
-        return new Response("Full Backfill process finished. Check D1 for results.");
+        return new Response("Full Backfill process finished.");
       } catch (e: any) {
         return new Response(`Backfill Error: ${e.message}`, { status: 500 });
       }
@@ -59,12 +79,15 @@ export default {
     // --- DATABASE HEALTH CHECK ---
     if (url.pathname === "/health") {
       const stats = await env.DB.prepare(`
-        SELECT COUNT(*) as total, COUNT(last_modified) as healed FROM cves
+        SELECT 
+          (SELECT COUNT(*) FROM cves) as total_cves,
+          (SELECT COUNT(*) FROM attack_techniques) as attack_techniques,
+          (SELECT COUNT(*) FROM cisa_kev) as kev_count
       `).first();
       return Response.json(stats);
     }
 
-    return new Response("ICS Vuln Score API is Active. Use /backfill-execute to begin healing.", {
+    return new Response("ICS Vuln Score API is Active.", {
       headers: { "Content-Type": "text/plain" }
     });
   },
@@ -73,15 +96,10 @@ export default {
    * 2. SCHEDULED HANDLER: Automated Maintenance
    */
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
-    switch (controller.cron) {
-      case "0 0 * * *": 
-        console.log("Daily Maintenance: Running Incremental NVD Sync...");
-        ctx.waitUntil(updateNVDIncremental(env));
-        break;
-      case "0 0 */2 * *":
-        console.log("Bi-Daily Maintenance: Running KEV Sync...");
-        ctx.waitUntil(syncKevData(env));
-        break;
-    }
+    // Regular maintenance ensures KEV and NVD stay current
+    console.log(`Running scheduled task: ${controller.cron}`);
+    
+    ctx.waitUntil(updateNVDIncremental(env));
+    ctx.waitUntil(syncKevData(env));
   }
 };
