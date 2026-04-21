@@ -1,33 +1,25 @@
 export async function backfillAttackMappings(env: any) {
-  console.log("Starting 300k CVE-to-ATT&CK mapping...");
-
-  // 1. Get a batch of CVEs that are not yet mapped
+  // 1. Grab CVEs that have a weakness but aren't mapped to a technique yet
   const { results } = await env.DB.prepare(`
-    SELECT cve_id FROM cves 
-    WHERE cve_id NOT IN (SELECT DISTINCT cve_id FROM cve_attack_mapping)
+    SELECT wd.cve_id 
+    FROM cve_weakness_data wd
+    WHERE wd.cve_id NOT IN (SELECT cve_id FROM cve_attack_mapping)
     LIMIT 2000
   `).all();
 
-  if (results.length === 0) return "Mapping Complete.";
-
-  const statements: any[] = [];
-  for (const row of results) {
-    // Logic: If the CVE matches a CWE in our 'reference' bridge, create the link
-    statements.push(env.DB.prepare(`
-      INSERT OR IGNORE INTO cve_attack_mapping (cve_id, technique_id)
-      SELECT ?, technique_id 
-      FROM attack_to_cwe_reference 
-      WHERE cwe_id IN (
-          -- This subquery extracts the CWE ID we saved during the NVD backfill
-          SELECT cwe_id FROM cve_weakness_data WHERE cve_id = ?
-      )
-    `).bind(row.cve_id, row.cve_id));
+  if (!results || results.length === 0) {
+    return "No new CVEs found to map. All current weaknesses are processed.";
   }
 
-  // Batch execute
-  for (let i = 0; i < statements.length; i += 50) {
-    await env.DB.batch(statements.slice(i, i + 50));
-  }
+  // 2. Map them using a TRIMmed and fuzzy join to ignore spaces/formatting
+  const { meta } = await env.DB.prepare(`
+    INSERT OR IGNORE INTO cve_attack_mapping (cve_id, technique_id)
+    SELECT wd.cve_id, r.technique_id
+    FROM cve_weakness_data wd
+    JOIN attack_to_cwe_reference r ON 
+      REPLACE(wd.cwe_id, ' ', '') = REPLACE(r.cwe_id, ' ', '')
+    WHERE wd.cve_id IN (SELECT value FROM json_each(?))
+  `).bind(JSON.stringify(results.map(r => r.cve_id))).run();
 
-  return `Mapped ${results.length} rows. Run again for next batch.`;
+  return `Processed ${results.length} CVEs. Successfully linked ${meta.changes} new mappings.`;
 }
