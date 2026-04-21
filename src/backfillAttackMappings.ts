@@ -1,5 +1,5 @@
 export async function backfillAttackMappings(env: any) {
-  // Increase limit to 5000 for faster processing
+  // Process 5,000 at a time for speed
   const { results } = await env.DB.prepare(`
     SELECT wd.cve_id 
     FROM cve_weakness_data wd
@@ -7,9 +7,9 @@ export async function backfillAttackMappings(env: any) {
     LIMIT 5000
   `).all();
 
-  if (!results || results.length === 0) return "Backfill complete. No more unmapped weaknesses found.";
+  if (!results || results.length === 0) return "All current vulnerabilities mapped.";
 
-  // Clean data on the fly during the join
+  // JOIN using a 'REPLACE' to ignore those pesky spaces in 'CWE- 122'
   const { meta } = await env.DB.prepare(`
     INSERT OR IGNORE INTO cve_attack_mapping (cve_id, technique_id)
     SELECT wd.cve_id, r.technique_id
@@ -19,5 +19,5 @@ export async function backfillAttackMappings(env: any) {
     WHERE wd.cve_id IN (SELECT value FROM json_each(?))
   `).bind(JSON.stringify(results.map(r => r.cve_id))).run();
 
-  return `Batch complete. Successfully linked ${meta.changes} new mappings. Refresh to continue.`;
+  return `Batch complete. Successfully linked ${meta.changes} new mappings.`;
 }
