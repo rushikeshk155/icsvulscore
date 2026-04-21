@@ -1,3 +1,8 @@
+/**
+ * ICS Vuln Score - Main Worker Handler
+ * Version: 2.0 (Intelligence-Integrated)
+ */
+
 import { updateNVDIncremental } from "./updateNVD";
 import { backfillNVD } from "./backfillNVD";
 import { syncKevData } from "./updateKEV";
@@ -5,10 +10,13 @@ import { syncAttackTechniques } from "./syncAttack";
 import { backfillAttackMappings } from "./backfillAttackMappings";
 
 export default {
+  /**
+   * 1. FETCH HANDLER: API requests and Manual Triggers
+   */
   async fetch(request: Request, env: any, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
-    // --- 1. SEARCH API (The Unified Intelligence View) ---
+    // --- SEARCH API: Retrieve asset vulnerabilities with Weighted ICS Logic ---
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
     
@@ -16,19 +24,26 @@ export default {
       const data = await env.DB.prepare(`
         SELECT 
           c.cve_id, 
-          c.cvss_score, 
+          c.cvss_score,
+          -- CUSTOM RISK SCORE: CVSS + KEV Bonus + Impact Bonus (Cap at 10.0)
+          MIN(10.0, c.cvss_score + 
+            (CASE WHEN k.cve_id IS NOT NULL THEN 2.0 ELSE 0.0 END) + 
+            (CASE WHEN at.tactic IN ('impact', 'inhibit response function') THEN 1.5 ELSE 0.0 END)
+          ) as ics_weighted_score,
           c.description, 
           at.tactic, 
           at.name as technique_name,
           CASE WHEN k.cve_id IS NOT NULL THEN 1 ELSE 0 END as is_kev
         FROM cves c 
         JOIN cve_cpe_mapping m ON c.cve_id = m.cve_id 
+        -- Bridge to MITRE Techniques
         LEFT JOIN cve_attack_mapping cam ON c.cve_id = cam.cve_id
         LEFT JOIN attack_techniques at ON cam.technique_id = at.technique_id
+        -- Bridge to CISA KEV
         LEFT JOIN cisa_kev k ON c.cve_id = k.cve_id
         WHERE m.make LIKE ? AND m.model LIKE ? 
         GROUP BY c.cve_id 
-        ORDER BY is_kev DESC, c.cvss_score DESC
+        ORDER BY ics_weighted_score DESC, is_kev DESC
       `).bind("%" + make.toLowerCase() + "%", "%" + model.toLowerCase() + "%").all();
       
       return Response.json({ 
@@ -42,7 +57,7 @@ export default {
       });
     }
 
-    // --- 2. MITRE ATT&CK SYNC (Enterprise + ICS) ---
+    // --- MANUAL SYNC: MITRE ATT&CK Library (Enterprise + ICS) ---
     if (url.pathname === "/sync-attack-library") {
       try {
         await syncAttackTechniques(env);
@@ -52,7 +67,7 @@ export default {
       }
     }
 
-    // --- 3. CISA KEV SYNC ---
+    // --- MANUAL SYNC: CISA KEV ---
     if (url.pathname === "/sync-kev") {
       try {
         await syncKevData(env);
@@ -62,7 +77,7 @@ export default {
       }
     }
 
-    // --- 4. HISTORICAL MAPPING BACKFILL ---
+    // --- MANUAL SYNC: Backfill Intelligence Mappings ---
     if (url.pathname === "/backfill-attack") {
       try {
         const status = await backfillAttackMappings(env);
@@ -72,7 +87,7 @@ export default {
       }
     }
 
-    // --- 5. NVD MAINTENANCE ROUTES ---
+    // --- MAINTENANCE: NVD Sync Routes ---
     if (url.pathname === "/sync-incremental") {
       try {
         await updateNVDIncremental(env);
@@ -91,7 +106,7 @@ export default {
       }
     }
 
-    // --- 6. HEALTH CHECK ---
+    // --- DATABASE HEALTH REPORT ---
     if (url.pathname === "/health") {
       const stats = await env.DB.prepare(`
         SELECT 
@@ -103,13 +118,16 @@ export default {
       return Response.json(stats);
     }
 
-    return new Response("ICS Vuln Score API is Online.", {
+    return new Response("ICS Vuln Score API is Online. Please use ?make= &model= to search.", {
       headers: { "Content-Type": "text/plain" }
     });
   },
 
-  // AUTOMATED DAILY UPDATES
+  /**
+   * 2. SCHEDULED HANDLER: Daily Maintenance
+   */
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
+    // Keep NVD and KEV data fresh every day
     ctx.waitUntil(updateNVDIncremental(env));
     ctx.waitUntil(syncKevData(env));
   }
