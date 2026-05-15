@@ -1,1 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICS Risk Auditor | Bulk Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+</head>
+<body class="bg-[#0b1120] text-slate-200 min-h-screen selection:bg-blue-500/30">
 
+    <div class="max-w-5xl mx-auto py-12 px-6">
+        <header class="flex justify-between items-center border-b border-slate-800 pb-8 mb-12">
+            <div>
+                <h1 class="text-3xl font-extrabold tracking-tight text-white italic">ICS <span class="text-blue-500">AUDITOR</span></h1>
+                <p class="text-slate-500 text-xs mt-1 font-mono uppercase tracking-widest">Asset Risk Management Engine v2.0</p>
+            </div>
+            <button onclick="downloadTemplate()" class="text-[10px] font-bold text-slate-400 hover:text-white uppercase tracking-widest border border-slate-700 hover:border-blue-500 px-4 py-2 rounded-lg transition-all">
+                Download CSV Template
+            </button>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+            <div class="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 shadow-xl">
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">1. Inventory Upload</label>
+                <input type="file" id="csvFile" accept=".csv" 
+                    class="block w-full text-xs text-slate-500 
+                    file:mr-4 file:py-2 file:px-4 
+                    file:rounded file:border-0 
+                    file:text-xs file:font-bold 
+                    file:bg-blue-600 file:text-white 
+                    hover:file:bg-blue-500 cursor-pointer">
+                <p class="text-[10px] text-slate-600 mt-3 italic">* Required columns: Asset_ID, Make, Model</p>
+            </div>
+
+            <div class="flex flex-col justify-center">
+                <button onclick="runAudit()" id="scanBtn" 
+                    class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-xl transition-all shadow-lg shadow-blue-900/20 active:scale-95 text-md uppercase tracking-wider">
+                    Generate Risk Report
+                </button>
+                <div id="status" class="mt-4 text-center font-mono text-[10px] text-yellow-500 hidden uppercase tracking-widest">
+                    Initializing Engine...
+                </div>
+            </div>
+        </div>
+
+        <div id="reportArea" class="hidden mb-12 p-6 bg-blue-500/10 border border-blue-500/30 rounded-2xl flex justify-between items-center animate-pulse">
+            <div>
+                <span class="text-blue-400 font-bold text-sm uppercase italic">Audit Complete</span>
+                <p class="text-xs text-slate-400 mt-1">Risk profiles generated for all inventory assets.</p>
+            </div>
+            <button onclick="downloadReport()" 
+                class="bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-black py-3 px-8 rounded-full uppercase shadow-lg shadow-blue-900/40">
+                Download Final Report (.csv)
+            </button>
+        </div>
+
+        <div class="bg-slate-900/80 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
+            <table class="w-full text-left border-collapse">
+                <thead class="bg-slate-800/50 text-slate-500 text-[10px] uppercase tracking-widest">
+                    <tr>
+                        <th class="p-5 font-bold">Asset Info</th>
+                        <th class="p-5 font-bold text-center border-x border-slate-800">CVE Count</th>
+                        <th class="p-5 font-bold text-center">Risk Score</th>
+                        <th class="p-5 font-bold text-right italic">Top Tactic</th>
+                    </tr>
+                </thead>
+                <tbody id="auditTable" class="text-sm">
+                    <tr>
+                        <td colspan="4" class="p-20 text-center text-slate-700 italic font-mono text-xs uppercase tracking-widest">
+                            Awaiting inventory upload to begin analysis...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // API CONFIGURATION
+        const WORKER_URL = "https://icsvulscore.cloudflare-rushikeshk155.workers.dev";
+        let resultsData = [];
+
+        // 1. GENERATE ASSET TEMPLATE
+        function downloadTemplate() {
+            const csvRows = [
+                ["Asset_ID", "Make", "Model", "Location"],
+                ["PLC-SEC-01", "Siemens", "S7-1200", "Boiler Room"],
+                ["HMI-FRONT-02", "Schneider Electric", "Magelis", "Main Floor"]
+            ];
+            const csvContent = csvRows.map(e => e.join(",")).join("\n");
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const link = document.createElement('a');
+            link.href = window.URL.createObjectURL(blob);
+            link.download = 'Asset_Inventory_Template.csv';
+            link.click();
+        }
+
+        // 2. RUN BULK SCAN ENGINE
+        async function runAudit() {
+            const fileInput = document.getElementById('csvFile');
+            if (!fileInput.files[0]) return alert("Please select your Asset CSV file first.");
+
+            const table = document.getElementById('auditTable');
+            const status = document.getElementById('status');
+            const reportArea = document.getElementById('reportArea');
+
+            // Reset UI
+            table.innerHTML = "";
+            resultsData = [];
+            status.classList.remove('hidden');
+            reportArea.classList.add('hidden');
+
+            Papa.parse(fileInput.files[0], {
+                header: true,
+                skipEmptyLines: true,
+                complete: async function(results) {
+                    const assets = results.data;
+                    
+                    for (let i = 0; i < assets.length; i++) {
+                        const asset = assets[i];
+                        status.innerText = `ANALYZING: ${asset.Make} ${asset.Model} (${i+1}/${assets.length})`;
+                        
+                        try {
+                            // Hit the Cloudflare Worker API
+                            const res = await fetch(`${WORKER_URL}/?make=${encodeURIComponent(asset.Make)}&model=${encodeURIComponent(asset.Model)}`);
+                            const data = await res.json();
+                            
+                            // Grab the top prioritized vulnerability
+                            const top = data.vulnerabilities[0] || {};
+                            
+                            const entry = {
+                                Asset_ID: asset.Asset_ID || "N/A",
+                                Location: asset.Location || "Unknown",
+                                Make: asset.Make,
+                                Model: asset.Model,
+                                CVE_Count: data.count,
+                                Risk_Score: top.ics_weighted_score || 0,
+                                Top_Tactic: top.tactic || "None",
+                                Top_CVE: top.cve_id || "None",
+                                Exploit_Status: top.is_kev ? "ACTIVE EXPLOIT" : "Standard"
+                            };
+                            
+                            resultsData.push(entry);
+                            renderRow(entry);
+                        } catch (err) {
+                            console.error("API Error for asset:", asset.Asset_ID, err);
+                        }
+                    }
+                    
+                    status.classList.add('hidden');
+                    reportArea.classList.remove('hidden');
+                }
+            });
+        }
+
+        // 3. UI TABLE RENDERER
+        function renderRow(r) {
+            const table = document.getElementById('auditTable');
+            let scoreColor = "text-slate-500";
+            
+            if (r.Risk_Score >= 9) scoreColor = "text-red-500 font-black drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]";
+            else if (r.Risk_Score >= 7) scoreColor = "text-orange-500 font-bold";
+            else if (r.Risk_Score > 0) scoreColor = "text-yellow-500";
+
+            const rowHTML = `
+                <tr class="border-t border-slate-800 hover:bg-blue-500/5 transition-all group">
+                    <td class="p-5">
+                        <span class="block text-white font-bold text-xs uppercase tracking-tight">${r.Asset_ID}</span>
+                        <span class="text-[10px] text-slate-500 font-mono uppercase">${r.Location}</span>
+                    </td>
+                    <td class="p-5 border-x border-slate-800/50">
+                        <span class="block text-slate-300 font-medium">${r.Make}</span>
+                        <span class="text-[10px] text-slate-500">${r.Model}</span>
+                    </td>
+                    <td class="p-5 text-center font-mono text-blue-400 group-hover:text-blue-300 transition-colors">
+                        ${r.CVE_Count}
+                    </td>
+                    <td class="p-5 text-center ${scoreColor} text-xl mono tracking-tighter">
+                        ${r.Risk_Score > 0 ? r.Risk_Score : '--'}
+                    </td>
+                    <td class="p-5 text-right">
+                        <span class="text-[9px] bg-slate-800 group-hover:bg-slate-700 px-2 py-1 rounded border border-slate-700 text-slate-400 uppercase font-black tracking-widest transition-all">
+                            ${r.Top_Tactic}
+                        </span>
+                    </td>
+                </tr>
+            `;
+            table.innerHTML += rowHTML;
+        }
+
+        // 4. EXPORT FINAL RESULTS
+        function downloadReport() {
+            const csv = Papa.unparse(resultsData);
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Risk_Audit_Report_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+        }
+    </script>
+</body>
+</html>
