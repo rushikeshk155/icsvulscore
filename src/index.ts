@@ -1,6 +1,6 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 2.1 (UI Optimized)
+ * Version: 2.2 (Firmware & Mitigation Integrated)
  */
 
 import { updateNVDIncremental } from "./updateNVD";
@@ -14,7 +14,7 @@ export default {
     const url = new URL(request.url);
 
     // --- 0. HANDLE CORS PRE-FLIGHT ---
-    // Essential for the Frontend UI to talk to this Worker from a different domain
+    // Necessary for browsers to allow the UI to talk to the Worker
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
@@ -25,16 +25,17 @@ export default {
       });
     }
 
-    // --- 1. SEARCH API: Retrieve asset vulnerabilities with Weighted ICS Logic ---
+    // --- 1. SEARCH API: Firmware-Aware ICS Weighted Logic ---
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
+    const firmware = url.searchParams.get("firmware");
     
     if (make && model) {
-      const data = await env.DB.prepare(`
+      let query = `
         SELECT 
           c.cve_id, 
           c.cvss_score,
-          -- CUSTOM RISK SCORE calculation
+          -- WEIGHTED SCORING ENGINE
           MIN(10.0, c.cvss_score + 
             (CASE WHEN k.cve_id IS NOT NULL THEN 2.0 ELSE 0.0 END) + 
             (CASE WHEN at.tactic IN ('impact', 'inhibit response function') THEN 1.5 ELSE 0.0 END)
@@ -43,17 +44,26 @@ export default {
           at.tactic, 
           at.name as technique_name,
           CASE WHEN k.cve_id IS NOT NULL THEN 1 ELSE 0 END as is_kev,
-          -- Mapping KEV required action as the primary mitigation
           IFNULL(k.required_action, 'Refer to vendor security advisory for patch details.') as mitigation
         FROM cves c 
         JOIN cve_cpe_mapping m ON c.cve_id = m.cve_id 
         LEFT JOIN cve_attack_mapping cam ON c.cve_id = cam.cve_id
         LEFT JOIN attack_techniques at ON cam.technique_id = at.technique_id
         LEFT JOIN cisa_kev k ON c.cve_id = k.cve_id
-        WHERE m.make LIKE ? AND m.model LIKE ? 
-        GROUP BY c.cve_id 
-        ORDER BY ics_weighted_score DESC, is_kev DESC
-      `).bind("%" + make.toLowerCase() + "%", "%" + model.toLowerCase() + "%").all();
+        WHERE m.make LIKE ? AND m.model LIKE ?
+      `;
+
+      const params: any[] = ["%" + make.toLowerCase() + "%", "%" + model.toLowerCase() + "%"];
+
+      // Add Firmware filtering if provided by the UI
+      if (firmware && firmware.trim() !== "" && firmware !== "null") {
+        query += ` AND m.firmware LIKE ?`;
+        params.push("%" + firmware.toLowerCase() + "%");
+      }
+
+      query += ` GROUP BY c.cve_id ORDER BY ics_weighted_score DESC, is_kev DESC`;
+
+      const data = await env.DB.prepare(query).bind(...params).all();
       
       return Response.json({ 
         count: data.results.length,
@@ -66,27 +76,29 @@ export default {
       });
     }
 
-    // --- 2. MANUAL SYNC: MITRE ATT&CK Library ---
+    // --- 2. ADMIN & MAINTENANCE ROUTES ---
+
+    // MITRE ATT&CK Library Sync
     if (url.pathname === "/sync-attack-library") {
       try {
         await syncAttackTechniques(env);
-        return new Response("MITRE Library hydrated.");
+        return new Response("MITRE Library synced successfully.");
       } catch (e: any) {
         return new Response(`Sync failed: ${e.message}`, { status: 500 });
       }
     }
 
-    // --- 3. MANUAL SYNC: CISA KEV ---
+    // CISA KEV Sync
     if (url.pathname === "/sync-kev") {
       try {
         await syncKevData(env);
-        return new Response("CISA KEV Table updated.");
+        return new Response("CISA KEV updated.");
       } catch (e: any) {
-        return new Response(`KEV Sync failed: ${e.message}`, { status: 500 });
+        return new Response(`KEV Error: ${e.message}`, { status: 500 });
       }
     }
 
-    // --- 4. MANUAL SYNC: Backfill Intelligence Mappings ---
+    // Intelligence Mapping Backfill (Link CVEs to MITRE)
     if (url.pathname === "/backfill-attack") {
       try {
         const status = await backfillAttackMappings(env);
@@ -96,17 +108,18 @@ export default {
       }
     }
 
-    // --- 5. MAINTENANCE: NVD Sync Routes ---
+    // NVD Data Maintenance
     if (url.pathname === "/sync-incremental") {
-      try {
         await updateNVDIncremental(env);
         return new Response("NVD Sync complete.");
-      } catch (e: any) {
-        return new Response(`NVD Error: ${e.message}`, { status: 500 });
-      }
     }
 
-    // --- 6. DATABASE HEALTH REPORT ---
+    if (url.pathname === "/backfill-execute") {
+        await backfillNVD(env);
+        return new Response("NVD Backfill started.");
+    }
+
+    // Database Health Status
     if (url.pathname === "/health") {
       const stats = await env.DB.prepare(`
         SELECT 
@@ -118,11 +131,14 @@ export default {
       return Response.json(stats);
     }
 
-    return new Response("ICS Vuln Score API is Online. Use ?make= &model= for audit data.", {
+    return new Response("ICS Vuln API Online. Use UI dashboard for scans.", {
       headers: { "Content-Type": "text/plain" }
     });
   },
 
+  /**
+   * 2. SCHEDULED HANDLER: Runs daily at midnight
+   */
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
     ctx.waitUntil(updateNVDIncremental(env));
     ctx.waitUntil(syncKevData(env));
