@@ -3,22 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ICS Risk Auditor | Firmware-Aware</title>
+    <title>ICS Risk Auditor | Unified Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght=400;600;800&family=JetBrains+Mono&display=swap');
         body { font-family: 'Inter', sans-serif; }
         .mono { font-family: 'JetBrains Mono', monospace; }
     </style>
 </head>
 <body class="bg-[#0b1120] text-slate-200 min-h-screen">
 
-    <div class="max-w-5xl mx-auto py-12 px-6">
+    <div class="max-w-6xl mx-auto py-12 px-6">
         <header class="flex justify-between items-center border-b border-slate-800 pb-8 mb-12">
             <div>
                 <h1 class="text-3xl font-black tracking-tight text-white italic uppercase">ICS <span class="text-blue-500 font-extrabold">Auditor</span></h1>
-                <p class="text-slate-500 text-[10px] mt-1 font-mono uppercase tracking-[0.2em]">Firmware-Aware Scan Engine v2.3</p>
+                <p class="text-slate-500 text-[10px] mt-1 font-mono uppercase tracking-[0.2em]">Max CVE Tracking Engine v3.2</p>
             </div>
             <button onclick="downloadTemplate()" class="text-[10px] font-bold text-blue-400 hover:text-white uppercase tracking-widest border border-blue-400/20 hover:border-blue-500 px-5 py-2.5 rounded-lg transition-all bg-blue-500/5">
                 Download CSV Template
@@ -30,7 +30,6 @@
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">1. Asset Inventory Upload</label>
                 <input type="file" id="csvFile" accept=".csv" 
                     class="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer">
-                <p class="text-[9px] text-slate-600 mt-3 italic">* Template includes: Asset_ID, Make, Model, Firmware, Location</p>
             </div>
 
             <div class="flex flex-col justify-center">
@@ -39,7 +38,7 @@
                     Generate Risk Report
                 </button>
                 <div id="status" class="mt-4 text-center font-mono text-[10px] text-yellow-500 hidden uppercase tracking-[0.3em] animate-pulse">
-                    Scanning Assets...
+                    Parsing Risk Profiles...
                 </div>
             </div>
         </div>
@@ -47,7 +46,7 @@
         <div id="reportArea" class="hidden mb-12 p-6 bg-green-500/10 border border-green-500/30 rounded-2xl flex justify-between items-center">
             <div>
                 <span class="text-green-400 font-bold text-sm uppercase italic tracking-wider">Scan Complete</span>
-                <p class="text-xs text-slate-400 mt-1">ピンポイント (Pinpoint) accuracy achieved using firmware matching.</p>
+                <p class="text-xs text-slate-400 mt-1">Highest severity CVE tracks have been attached to inventory assets.</p>
             </div>
             <button onclick="downloadReport()" 
                 class="bg-green-600 hover:bg-green-500 text-white text-[10px] font-black py-3 px-8 rounded-full uppercase shadow-lg shadow-green-900/40">
@@ -61,14 +60,15 @@
                     <tr>
                         <th class="p-5">Asset Details</th>
                         <th class="p-5 text-center border-x border-slate-800/50">Firmware</th>
-                        <th class="p-5 text-center">Score</th>
+                        <th class="p-5 text-center">Max CVE ID</th>
+                        <th class="p-5 text-center border-x border-slate-800/50">Risk Score</th>
                         <th class="p-5 text-right font-bold italic">Tactic</th>
                     </tr>
                 </thead>
                 <tbody id="auditTable" class="text-sm">
                     <tr>
-                        <td colspan="4" class="p-20 text-center text-slate-700 italic font-mono text-[10px] uppercase tracking-widest">
-                            Ready for firmware-aware analysis...
+                        <td colspan="5" class="p-20 text-center text-slate-700 italic font-mono text-[10px] uppercase tracking-widest">
+                            Ready for contextual vulnerability analysis...
                         </td>
                     </tr>
                 </tbody>
@@ -80,22 +80,21 @@
         const WORKER_URL = "https://icsvulscore.cloudflare-rushikeshk155.workers.dev";
         let resultsData = [];
 
-        // 1. UPDATED TEMPLATE GENERATOR
         function downloadTemplate() {
             const csvRows = [
                 ["Asset_ID", "Make", "Model", "Firmware", "Location"],
-                ["PLC-01", "Siemens", "S7-1200", "4.2.1", "Substation Alpha"],
-                ["HMI-01", "Schneider Electric", "Magelis", "2.1", "Control Room"]
+                ["PLC-01", "Siemens", "S7-1200", "4.2.*", "Substation Alpha"],
+                ["HMI-01", "Siemens", "TP700", "17", "Control Room"],
+                ["PLC-02", "Rockwell", "ControlLogix_5570", "20.011", "Water Treatment"]
             ];
             const csvContent = csvRows.map(e => e.join(",")).join("\n");
             const blob = new Blob([csvContent], { type: 'text/csv' });
             const link = document.createElement('a');
             link.href = window.URL.createObjectURL(blob);
-            link.download = 'ICS_Asset_Template_v2.csv';
+            link.download = 'ICS_Asset_Template_v3.csv';
             link.click();
         }
 
-        // 2. UPDATED AUDIT ENGINE
         async function runAudit() {
             const fileInput = document.getElementById('csvFile');
             if (!fileInput.files[0]) return alert("Please upload your inventory CSV.");
@@ -119,24 +118,31 @@
                         const asset = assets[i];
                         status.innerText = `ANALYZING: ${asset.Make} ${asset.Model} (${i+1}/${assets.length})`;
                         
-                        // Extract Firmware from CSV
                         const fw = asset.Firmware || asset.firmware || "";
                         
                         try {
                             const res = await fetch(`${WORKER_URL}/?make=${encodeURIComponent(asset.Make)}&model=${encodeURIComponent(asset.Model)}&firmware=${encodeURIComponent(fw)}`);
                             const data = await res.json();
                             
+                            // Item 0 is guaranteed to hold the absolute max severity threat from D1 sorting rules
                             const top = data.vulnerabilities[0] || {};
+                            
                             const entry = {
-                                ...asset,
-                                vuln_count: data.count,
-                                risk_score: top.ics_weighted_score || 0,
-                                tactic: top.tactic || "None",
-                                mitigation: top.mitigation || "N/A"
+                                Asset_ID: asset.Asset_ID || 'N/A',
+                                Make: asset.Make,
+                                Model: asset.Model,
+                                Firmware: fw,
+                                Location: asset.Location || 'Unknown',
+                                Max_CVE_ID: top.cve_id || 'NONE',
+                                Risk_Score: top.ics_weighted_score || 0,
+                                Tactic: top.tactic || 'NONE',
+                                Technique: top.technique_name || 'NONE',
+                                Mitigation: top.mitigation || 'N/A',
+                                Description: top.description || 'No vulnerabilities found.'
                             };
                             
                             resultsData.push(entry);
-                            renderRow(entry, fw);
+                            renderRow(entry);
                         } catch (err) {
                             console.error(err);
                         }
@@ -147,27 +153,37 @@
             });
         }
 
-        function renderRow(r, fw) {
+        function renderRow(r) {
             const table = document.getElementById('auditTable');
             let scoreColor = "text-slate-500";
-            if (r.risk_score >= 9) scoreColor = "text-red-500 font-black drop-shadow-[0_0_8px_rgba(239,68,68,0.3)]";
-            else if (r.risk_score >= 7) scoreColor = "text-orange-500 font-bold";
+            let cveColor = "text-slate-400";
+            
+            if (r.Risk_Score >= 9) {
+                scoreColor = "text-red-500 font-black drop-shadow-[0_0_8px_rgba(239,68,68,0.3)]";
+                cveColor = "text-red-400 font-semibold";
+            } else if (r.Risk_Score >= 7) {
+                scoreColor = "text-orange-500 font-bold";
+                cveColor = "text-orange-400";
+            }
 
             table.innerHTML += `
                 <tr class="border-t border-slate-800/50 hover:bg-blue-500/5 transition-all group">
                     <td class="p-5">
-                        <span class="block text-white font-bold text-xs uppercase tracking-tight">${r.Asset_ID || 'UNTITLED'}</span>
+                        <span class="block text-white font-bold text-xs uppercase tracking-tight">${r.Asset_ID}</span>
                         <span class="text-[9px] text-slate-500 font-mono uppercase">${r.Make} ${r.Model}</span>
                     </td>
-                    <td class="p-5 text-center border-x border-slate-800/50 font-mono text-[10px] text-blue-400">
-                        ${fw || 'ANY'}
+                    <td class="p-5 text-center font-mono text-[10px] text-blue-400">
+                        ${r.Firmware || 'ANY'}
                     </td>
-                    <td class="p-5 text-center ${scoreColor} text-xl mono tracking-tighter">
-                        ${r.risk_score > 0 ? r.risk_score : '--'}
+                    <td class="p-5 text-center font-mono text-xs ${cveColor}">
+                        ${r.Max_CVE_ID}
+                    </td>
+                    <td class="p-5 text-center border-x border-slate-800/50 ${scoreColor} text-xl mono tracking-tighter">
+                        ${r.Risk_Score > 0 ? r.Risk_Score : '--'}
                     </td>
                     <td class="p-5 text-right">
                         <span class="text-[9px] bg-slate-800 px-2 py-1 rounded border border-slate-700 text-slate-500 uppercase font-black tracking-widest group-hover:text-slate-300 transition-colors">
-                            ${r.tactic}
+                            ${r.Tactic}
                         </span>
                     </td>
                 </tr>
@@ -180,7 +196,7 @@
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `ICS_Audit_Report_${new Date().toISOString().split('T')[0]}.csv`;
+            a.download = `ICS_Max_CVE_Audit_${new Date().toISOString().split('T')[0]}.csv`;
             a.click();
         }
     </script>
