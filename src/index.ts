@@ -1,6 +1,6 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 2.5 (Fuzzy Logic & Firmware Integrated)
+ * Version: 3.0 (Enterprise Resilient Search Engine)
  */
 
 import { updateNVDIncremental } from "./updateNVD";
@@ -13,7 +13,7 @@ export default {
   async fetch(request: Request, env: any, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
-    // --- 0. HANDLE CORS PRE-FLIGHT ---
+    // --- 0. GLOBAL CORS PRE-FLIGHT HANDLER ---
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
@@ -24,92 +24,143 @@ export default {
       });
     }
 
-    // --- 1. SEARCH API: Fuzzy Matching Engine ---
+    // --- 1. SEARCH API ENGINE ---
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
     const firmware = url.searchParams.get("firmware");
     
     if (make && model) {
-      // Logic: Strip '-', ' ', and '_' to match "S7-1214C" with "s71214c"
+      // Clean and normalize strings (remove spaces, dashes, underscores)
+      let cleanMake = make.toLowerCase().replace(/[-_\s]/g, "");
+      let cleanModel = model.toLowerCase().replace(/[-_\s]/g, "");
+      
+      // Extract numeric components for range-based search fallback (e.g., extracts "1200" or "5570")
+      const modelNumberMatch = model.match(/\d+/);
+      const modelNumStr = modelNumberMatch ? modelNumberMatch[0] : cleanModel;
+
+      // Base SQL structure
       let query = `
         SELECT 
           c.cve_id, 
           c.cvss_score,
+          -- INTEL WEIGHTED ICS RATING ENGINE
           MIN(10.0, c.cvss_score + 
             (CASE WHEN k.cve_id IS NOT NULL THEN 2.0 ELSE 0.0 END) + 
             (CASE WHEN at.tactic IN ('impact', 'inhibit response function') THEN 1.5 ELSE 0.0 END)
           ) as ics_weighted_score,
           c.description, 
-          at.tactic, 
+          IFNULL(at.tactic, 'NONE') as tactic, 
           at.name as technique_name,
           CASE WHEN k.cve_id IS NOT NULL THEN 1 ELSE 0 END as is_kev,
-          IFNULL(k.required_action, 'Refer to vendor security advisory.') as mitigation
+          IFNULL(k.required_action, 'Refer to vendor security advisory for mitigation guidance.') as mitigation
         FROM cves c 
         JOIN cve_cpe_mapping m ON c.cve_id = m.cve_id 
         LEFT JOIN cve_attack_mapping cam ON c.cve_id = cam.cve_id
         LEFT JOIN attack_techniques at ON cam.technique_id = at.technique_id
         LEFT JOIN cisa_kev k ON c.cve_id = k.cve_id
         WHERE 
-          -- Normalize DB Make: remove dashes, spaces, underscores
-          REPLACE(REPLACE(REPLACE(LOWER(m.make), '-', ''), ' ', ''), '_', '') LIKE ? 
+          -- Loose/Normalized Vendor Match
+          (REPLACE(REPLACE(REPLACE(LOWER(m.make), '-', ''), ' ', ''), '_', '') LIKE ? 
+           OR LOWER(c.description) LIKE ?)
           AND 
-          -- Normalize DB Model: remove dashes, spaces, underscores
-          REPLACE(REPLACE(REPLACE(LOWER(m.model), '-', ''), ' ', ''), '_', '') LIKE ?
+          -- Loose/Normalized Model & Family Match
+          (REPLACE(REPLACE(REPLACE(LOWER(m.model), '-', ''), ' ', ''), '_', '') LIKE ? 
+           OR m.model LIKE ? 
+           OR LOWER(c.description) LIKE ?)
       `;
 
-      // Clean the User Input to match the DB normalization
-      const cleanMake = make.toLowerCase().replace(/[-_\s]/g, "");
-      const cleanModel = model.toLowerCase().replace(/[-_\s]/g, "");
+      // Formulate query params array
+      const params: any[] = [
+        "%" + cleanMake + "%",
+        "%" + make.toLowerCase() + "%",
+        "%" + cleanModel + "%",
+        "%" + modelNumStr + "%",
+        "%" + model.toLowerCase() + "%"
+      ];
 
-      const params: any[] = ["%" + cleanMake + "%", "%" + cleanModel + "%"];
-
-      // Add Firmware filtering if provided
-      if (firmware && firmware.trim() !== "" && firmware !== "null") {
-        query += ` AND m.firmware LIKE ?`;
-        params.push("%" + firmware.toLowerCase() + "%");
+      // Smart Firmware/Version Range Filtering Block
+      if (firmware && firmware.trim() !== "" && firmware !== "null" && firmware !== "*") {
+        const cleanFw = firmware.replace(/[*]/g, "").trim().toLowerCase();
+        
+        query += `
+          AND (
+            m.firmware LIKE ? 
+            OR m.firmware = '*' 
+            OR m.firmware = 'all'
+            -- Fallback: If NVD logs a blanket statement like "< V4.5.0", match via text description
+            OR (LOWER(c.description) LIKE '%version%' AND LOWER(c.description) LIKE '%<%')
+          )
+        `;
+        params.push("%" + cleanFw + "%");
       }
 
+      // Group to prevent duplications if a CVE points to multiple MITRE sub-techniques
       query += ` GROUP BY c.cve_id ORDER BY ics_weighted_score DESC, is_kev DESC`;
 
-      const data = await env.DB.prepare(query).bind(...params).all();
-      
-      return Response.json({ 
-        count: data.results.length,
-        vulnerabilities: data.results 
-      }, {
-        headers: { 
-          "Access-Control-Allow-Origin": "*", 
-          "Content-Type": "application/json" 
-        }
-      });
+      try {
+        const data = await env.DB.prepare(query).bind(...params).all();
+        
+        return Response.json({ 
+          count: data.results.length,
+          vulnerabilities: data.results 
+        }, {
+          headers: { 
+            "Access-Control-Allow-Origin": "*", 
+            "Content-Type": "application/json" 
+          }
+        });
+      } catch (err: any) {
+        return Response.json({ error: "Database Execution Error", details: err.message }, { status: 500 });
+      }
     }
 
-    // --- 2. ADMIN ROUTES (Manual Triggers) ---
+    // --- 2. ADMINISTRATIVE SYNC MAINTENANCE ROUTES ---
     if (url.pathname === "/sync-attack-library") {
-      await syncAttackTechniques(env);
-      return new Response("MITRE Library updated.");
+      try {
+        await syncAttackTechniques(env);
+        return new Response("MITRE ATT&CK Matrix synchronized.");
+      } catch (e: any) {
+        return new Response(`ATT&CK Sync failed: ${e.message}`, { status: 500 });
+      }
     }
 
     if (url.pathname === "/sync-kev") {
-      await syncKevData(env);
-      return new Response("CISA KEV updated.");
+      try {
+        await syncKevData(env);
+        return new Response("CISA Known Exploited Vulnerabilities table refreshed.");
+      } catch (e: any) {
+        return new Response(`KEV Sync failed: ${e.message}`, { status: 500 });
+      }
     }
 
     if (url.pathname === "/backfill-attack") {
-      const status = await backfillAttackMappings(env);
-      return new Response(status);
+      try {
+        const status = await backfillAttackMappings(env);
+        return new Response(status);
+      } catch (e: any) {
+        return new Response(`Mapping Engine failure: ${e.message}`, { status: 500 });
+      }
     }
 
     if (url.pathname === "/sync-incremental") {
+      try {
         await updateNVDIncremental(env);
-        return new Response("NVD Sync complete.");
+        return new Response("Daily incremental NVD sync processed.");
+      } catch (e: any) {
+        return new Response(`Incremental sync failure: ${e.message}`, { status: 500 });
+      }
     }
 
     if (url.pathname === "/backfill-execute") {
+      try {
         await backfillNVD(env);
-        return new Response("NVD Backfill running.");
+        return new Response("NVD Batch backfill routine initiated.");
+      } catch (e: any) {
+        return new Response(`Backfill process error: ${e.message}`, { status: 500 });
+      }
     }
 
+    // --- 3. INFRASTRUCTURE HEALTH TRACKING ---
     if (url.pathname === "/health") {
       const stats = await env.DB.prepare(`
         SELECT 
@@ -121,11 +172,13 @@ export default {
       return Response.json(stats);
     }
 
-    return new Response("ICS Vuln API Online. Use dashboard for scans.", {
+    // Default Fallback
+    return new Response("ICS Vuln Intelligence API Engine Core. Connect via your UI dashboard.", {
       headers: { "Content-Type": "text/plain" }
     });
   },
 
+  // Daily Cron Trigger for Continuous Sync Execution
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
     ctx.waitUntil(updateNVDIncremental(env));
     ctx.waitUntil(syncKevData(env));
