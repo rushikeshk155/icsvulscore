@@ -1,6 +1,6 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 3.2 (Fuzzy Normalization & Smart Range Fallbacks)
+ * Version: 3.5 (False-Positive Resilient Search Engine)
  */
 
 import { updateNVDIncremental } from "./updateNVD";
@@ -13,7 +13,7 @@ export default {
   async fetch(request: Request, env: any, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
-    // --- 0. CORSA PRE-FLIGHT BLOCK ---
+    // --- 0. GLOBAL CORS PRE-FLIGHT HANDLER ---
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
@@ -24,25 +24,30 @@ export default {
       });
     }
 
-    // --- 1. CORE INTELLIGENCE SEARCH ROUTE ---
+    // --- 1. SEARCH API ENGINE ---
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
     const firmware = url.searchParams.get("firmware");
     
     if (make && model) {
-      // Strip dashes, underscores, and spaces to cross-reference entries dynamically
+      // Clean and normalize strings (remove spaces, dashes, underscores)
       let cleanMake = make.toLowerCase().replace(/[-_\s]/g, "");
       let cleanModel = model.toLowerCase().replace(/[-_\s]/g, "");
       
-      // Separate out potential digits to broaden target framework hits (e.g., extracts "1200")
+      // Extract numeric components for family mapping (e.g., "1200" or "5570")
       const modelNumberMatch = model.match(/\d+/);
       const modelNumStr = modelNumberMatch ? modelNumberMatch[0] : cleanModel;
+
+      // Define architectural platform anchors to prevent cross-contamination
+      let platformAnchor = "";
+      if (cleanMake.includes("siemens")) platformAnchor = "s7";
+      if (cleanMake.includes("rockwell") || cleanMake.includes("allen")) platformAnchor = "logix";
 
       let query = `
         SELECT 
           c.cve_id, 
           c.cvss_score,
-          -- CALCULATION WEIGHTED ENGINE (BASE + ACTIVE THREAT + SYSTEM EXPLOIT FACTOR)
+          -- INTEL WEIGHTED ICS RATING ENGINE
           MIN(10.0, c.cvss_score + 
             (CASE WHEN k.cve_id IS NOT NULL THEN 2.0 ELSE 0.0 END) + 
             (CASE WHEN at.tactic IN ('impact', 'inhibit response function') THEN 1.5 ELSE 0.0 END)
@@ -58,13 +63,14 @@ export default {
         LEFT JOIN attack_techniques at ON cam.technique_id = at.technique_id
         LEFT JOIN cisa_kev k ON c.cve_id = k.cve_id
         WHERE 
-          -- Broad Vendor Checking Rules
-          (REPLACE(REPLACE(REPLACE(LOWER(m.make), '-', ''), ' ', ''), '_', '') LIKE ? OR LOWER(c.description) LIKE ?)
+          -- Normalized Vendor Check
+          (REPLACE(REPLACE(REPLACE(LOWER(m.make), '-', ''), ' ', ''), '_', '') LIKE ? 
+           OR LOWER(c.description) LIKE ?)
           AND 
-          -- Broad Model Family Checking Rules
+          -- Stricter Model Family Verification to stop chipset leaks
           (REPLACE(REPLACE(REPLACE(LOWER(m.model), '-', ''), ' ', ''), '_', '') LIKE ? 
            OR m.model LIKE ? 
-           OR LOWER(c.description) LIKE ?)
+           OR (LOWER(c.description) LIKE '%' || ? || '%' AND LOWER(c.description) LIKE '%' || ? || '%'))
       `;
 
       const params: any[] = [
@@ -72,10 +78,11 @@ export default {
         "%" + make.toLowerCase() + "%",
         "%" + cleanModel + "%",
         "%" + modelNumStr + "%",
-        "%" + model.toLowerCase() + "%"
+        modelNumStr,       // Must contain the specific series number (e.g., 1200)
+        platformAnchor     // Must also contain the industrial platform anchor (e.g., s7)
       ];
 
-      // Deep Evaluation Range Parser
+      // Smart Firmware/Version Range Filtering Block
       if (firmware && firmware.trim() !== "" && firmware !== "null" && firmware !== "*") {
         const cleanFw = firmware.replace(/[*]/g, "").trim().toLowerCase();
         
@@ -84,14 +91,12 @@ export default {
             m.firmware LIKE ? 
             OR m.firmware = '*' 
             OR m.firmware = 'all'
-            -- Catch-all fallback when NVD groups multiple software versions like "< V4.5.0"
             OR (LOWER(c.description) LIKE '%version%' AND LOWER(c.description) LIKE '%<%')
           )
         `;
         params.push("%" + cleanFw + "%");
       }
 
-      // Group outputs and push highest risk values to index 0
       query += ` GROUP BY c.cve_id ORDER BY ics_weighted_score DESC, is_kev DESC`;
 
       try {
@@ -111,7 +116,7 @@ export default {
       }
     }
 
-    // --- 2. ADMIN/SYNC PIPELINE CONTROL MAPS ---
+    // --- 2. ADMINISTRATIVE MAINTENANCE ROUTES ---
     if (url.pathname === "/sync-attack-library") {
       await syncAttackTechniques(env);
       return new Response("MITRE ATT&CK Matrix synchronized.");
@@ -119,7 +124,7 @@ export default {
 
     if (url.pathname === "/sync-kev") {
       await syncKevData(env);
-      return new Response("CISA KEV updated.");
+      return new Response("CISA Known Exploited Vulnerabilities table refreshed.");
     }
 
     if (url.pathname === "/backfill-attack") {
@@ -137,7 +142,7 @@ export default {
       return new Response("NVD Batch backfill routine initiated.");
     }
 
-    // --- 3. RUNTIME APP STATUS CONTROL ---
+    // --- 3. INFRASTRUCTURE HEALTH TRACKING ---
     if (url.pathname === "/health") {
       const stats = await env.DB.prepare(`
         SELECT 
@@ -149,7 +154,7 @@ export default {
       return Response.json(stats);
     }
 
-    return new Response("ICS Vuln Intelligence API Engine Core Active. Connect via UI.", {
+    return new Response("ICS Vuln Intelligence API Engine Core. Connect via your UI dashboard.", {
       headers: { "Content-Type": "text/plain" }
     });
   },
