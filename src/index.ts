@@ -1,6 +1,6 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 3.0 (Enterprise Resilient Search Engine)
+ * Version: 3.2 (Fuzzy Normalization & Smart Range Fallbacks)
  */
 
 import { updateNVDIncremental } from "./updateNVD";
@@ -13,7 +13,7 @@ export default {
   async fetch(request: Request, env: any, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
-    // --- 0. GLOBAL CORS PRE-FLIGHT HANDLER ---
+    // --- 0. CORSA PRE-FLIGHT BLOCK ---
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: {
@@ -24,26 +24,25 @@ export default {
       });
     }
 
-    // --- 1. SEARCH API ENGINE ---
+    // --- 1. CORE INTELLIGENCE SEARCH ROUTE ---
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
     const firmware = url.searchParams.get("firmware");
     
     if (make && model) {
-      // Clean and normalize strings (remove spaces, dashes, underscores)
+      // Strip dashes, underscores, and spaces to cross-reference entries dynamically
       let cleanMake = make.toLowerCase().replace(/[-_\s]/g, "");
       let cleanModel = model.toLowerCase().replace(/[-_\s]/g, "");
       
-      // Extract numeric components for range-based search fallback (e.g., extracts "1200" or "5570")
+      // Separate out potential digits to broaden target framework hits (e.g., extracts "1200")
       const modelNumberMatch = model.match(/\d+/);
       const modelNumStr = modelNumberMatch ? modelNumberMatch[0] : cleanModel;
 
-      // Base SQL structure
       let query = `
         SELECT 
           c.cve_id, 
           c.cvss_score,
-          -- INTEL WEIGHTED ICS RATING ENGINE
+          -- CALCULATION WEIGHTED ENGINE (BASE + ACTIVE THREAT + SYSTEM EXPLOIT FACTOR)
           MIN(10.0, c.cvss_score + 
             (CASE WHEN k.cve_id IS NOT NULL THEN 2.0 ELSE 0.0 END) + 
             (CASE WHEN at.tactic IN ('impact', 'inhibit response function') THEN 1.5 ELSE 0.0 END)
@@ -59,17 +58,15 @@ export default {
         LEFT JOIN attack_techniques at ON cam.technique_id = at.technique_id
         LEFT JOIN cisa_kev k ON c.cve_id = k.cve_id
         WHERE 
-          -- Loose/Normalized Vendor Match
-          (REPLACE(REPLACE(REPLACE(LOWER(m.make), '-', ''), ' ', ''), '_', '') LIKE ? 
-           OR LOWER(c.description) LIKE ?)
+          -- Broad Vendor Checking Rules
+          (REPLACE(REPLACE(REPLACE(LOWER(m.make), '-', ''), ' ', ''), '_', '') LIKE ? OR LOWER(c.description) LIKE ?)
           AND 
-          -- Loose/Normalized Model & Family Match
+          -- Broad Model Family Checking Rules
           (REPLACE(REPLACE(REPLACE(LOWER(m.model), '-', ''), ' ', ''), '_', '') LIKE ? 
            OR m.model LIKE ? 
            OR LOWER(c.description) LIKE ?)
       `;
 
-      // Formulate query params array
       const params: any[] = [
         "%" + cleanMake + "%",
         "%" + make.toLowerCase() + "%",
@@ -78,7 +75,7 @@ export default {
         "%" + model.toLowerCase() + "%"
       ];
 
-      // Smart Firmware/Version Range Filtering Block
+      // Deep Evaluation Range Parser
       if (firmware && firmware.trim() !== "" && firmware !== "null" && firmware !== "*") {
         const cleanFw = firmware.replace(/[*]/g, "").trim().toLowerCase();
         
@@ -87,14 +84,14 @@ export default {
             m.firmware LIKE ? 
             OR m.firmware = '*' 
             OR m.firmware = 'all'
-            -- Fallback: If NVD logs a blanket statement like "< V4.5.0", match via text description
+            -- Catch-all fallback when NVD groups multiple software versions like "< V4.5.0"
             OR (LOWER(c.description) LIKE '%version%' AND LOWER(c.description) LIKE '%<%')
           )
         `;
         params.push("%" + cleanFw + "%");
       }
 
-      // Group to prevent duplications if a CVE points to multiple MITRE sub-techniques
+      // Group outputs and push highest risk values to index 0
       query += ` GROUP BY c.cve_id ORDER BY ics_weighted_score DESC, is_kev DESC`;
 
       try {
@@ -114,53 +111,33 @@ export default {
       }
     }
 
-    // --- 2. ADMINISTRATIVE SYNC MAINTENANCE ROUTES ---
+    // --- 2. ADMIN/SYNC PIPELINE CONTROL MAPS ---
     if (url.pathname === "/sync-attack-library") {
-      try {
-        await syncAttackTechniques(env);
-        return new Response("MITRE ATT&CK Matrix synchronized.");
-      } catch (e: any) {
-        return new Response(`ATT&CK Sync failed: ${e.message}`, { status: 500 });
-      }
+      await syncAttackTechniques(env);
+      return new Response("MITRE ATT&CK Matrix synchronized.");
     }
 
     if (url.pathname === "/sync-kev") {
-      try {
-        await syncKevData(env);
-        return new Response("CISA Known Exploited Vulnerabilities table refreshed.");
-      } catch (e: any) {
-        return new Response(`KEV Sync failed: ${e.message}`, { status: 500 });
-      }
+      await syncKevData(env);
+      return new Response("CISA KEV updated.");
     }
 
     if (url.pathname === "/backfill-attack") {
-      try {
-        const status = await backfillAttackMappings(env);
-        return new Response(status);
-      } catch (e: any) {
-        return new Response(`Mapping Engine failure: ${e.message}`, { status: 500 });
-      }
+      const status = await backfillAttackMappings(env);
+      return new Response(status);
     }
 
     if (url.pathname === "/sync-incremental") {
-      try {
-        await updateNVDIncremental(env);
-        return new Response("Daily incremental NVD sync processed.");
-      } catch (e: any) {
-        return new Response(`Incremental sync failure: ${e.message}`, { status: 500 });
-      }
+      await updateNVDIncremental(env);
+      return new Response("Daily incremental NVD sync processed.");
     }
 
     if (url.pathname === "/backfill-execute") {
-      try {
-        await backfillNVD(env);
-        return new Response("NVD Batch backfill routine initiated.");
-      } catch (e: any) {
-        return new Response(`Backfill process error: ${e.message}`, { status: 500 });
-      }
+      await backfillNVD(env);
+      return new Response("NVD Batch backfill routine initiated.");
     }
 
-    // --- 3. INFRASTRUCTURE HEALTH TRACKING ---
+    // --- 3. RUNTIME APP STATUS CONTROL ---
     if (url.pathname === "/health") {
       const stats = await env.DB.prepare(`
         SELECT 
@@ -172,13 +149,11 @@ export default {
       return Response.json(stats);
     }
 
-    // Default Fallback
-    return new Response("ICS Vuln Intelligence API Engine Core. Connect via your UI dashboard.", {
+    return new Response("ICS Vuln Intelligence API Engine Core Active. Connect via UI.", {
       headers: { "Content-Type": "text/plain" }
     });
   },
 
-  // Daily Cron Trigger for Continuous Sync Execution
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
     ctx.waitUntil(updateNVDIncremental(env));
     ctx.waitUntil(syncKevData(env));
