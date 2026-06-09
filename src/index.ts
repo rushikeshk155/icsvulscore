@@ -1,8 +1,9 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 10.0 (True Multi-Stage Verification & Sandbox Testing Engine)
+ * Version: 11.0 (True Multi-Stage Verification & Modular Sandbox Engine)
  */
 
+import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto";
 import { updateNVDIncremental } from "./updateNVD";
 import { backfillNVD } from "./backfillNVD";
 import { syncKevData } from "./updateKEV";
@@ -10,13 +11,7 @@ import { syncAttackTechniques } from "./syncAttack";
 import { backfillAttackMappings } from "./backfillAttackMappings";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
-const RESEND_API_KEY = "re_ca1DWHcx..."; // Paste your real Resend token here
-
-async function hashPassword(pwd: string): Promise<string> {
-  const msgBuffer = new TextEncoder().encode(pwd + "ICS_SALT_2026");
-  const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
-}
+const RESEND_API_KEY = "re_ca1DWHcx..."; // <--- YOUR ACTUAL ACTIVE RESEND KEY STRING HERE
 
 function verifyIEC62443PasswordStrength(pwd: string): boolean {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/.test(pwd);
@@ -94,30 +89,31 @@ export default {
     if (url.pathname === "/auth/register" && request.method === "POST") {
       const { username, password, email } = await request.json() as any;
       if (!username || !password || !email) return Response.json({ error: "Missing fields" }, { status: 400, headers: corsHeaders });
-      if (!verifyIEC62443PasswordStrength(password)) return Response.json({ error: "Weak password." }, { status: 400, headers: corsHeaders });
+      if (!verifyIEC62443PasswordStrength(password)) return Response.json({ error: "Weak password implementation." }, { status: 400, headers: corsHeaders });
       
-      const pwdHash = await hashPassword(password);
+      // Call modern high-iteration PBKDF2 hasher module
+      const passwordAuthBlock = await generatePasswordParametricBlock(password);
       
       try {
         const userCheck = await env.DB.prepare("SELECT COUNT(*) as count FROM users").first();
         const isFirstUser = userCheck.count === 0;
         
-        // Setup state roles
+        // Setup initial system roles
         const role = isFirstUser ? 'admin' : 'user';
         const approved = isFirstUser ? 1 : 0;
         const emailVerified = isFirstUser ? 1 : 0;
 
-        // Write the real data to the database
-        await env.DB.prepare("INSERT INTO users (username, password_hash, email, role, approved, email_verified) VALUES (?, ?, ?, ?, ?, ?)")
-          .bind(username, pwdHash, email, role, approved, emailVerified).run();
+        // Save real registration data into the D1 schema instance
+        await env.DB.prepare("INSERT INTO users (username, password_auth_block, email, role, approved, email_verified) VALUES (?, ?, ?, ?, ?, ?)")
+          .bind(username, passwordAuthBlock, email, role, approved, emailVerified).run();
           
         const activationToken = btoa(JSON.stringify({ username, secret: SECRET_CRYPTO_KEY, stamp: Date.now() }));
         const activationLink = `${url.origin}/auth/verify?token=${encodeURIComponent(activationToken)}`;
 
         if (!isFirstUser) {
-          // 💡 FREE SANDBOX MODE ROUTING OVERRIDE:
-          // We target your one whitelisted Sandbox inbox so Resend processes the request cleanly,
-          // while keeping the registration tied to the user account created above.
+          // 💡 FREE SANDBOX MODE OVERRIDE RULE:
+          // Routes out-of-band messages to your primary authorized account email string,
+          // bypassing the Resend dev 403 blocks while testing with secondary usernames.
           const testSandboxTarget = "cloudflare.rushikeshk155@gmail.com";
           
           await sendVerificationEmail(testSandboxTarget, username, activationLink);
@@ -132,17 +128,21 @@ export default {
     // --- 3. LOGIN ENDPOINT ---
     if (url.pathname === "/auth/login" && request.method === "POST") {
       const { username, password } = await request.json() as any;
-      const pwdHash = await hashPassword(password);
 
-      const user = await env.DB.prepare("SELECT username, role, approved, email_verified FROM users WHERE username = ? AND password_hash = ?")
-        .bind(username, pwdHash).first();
+      const user = await env.DB.prepare("SELECT password_auth_block, role, approved, email_verified FROM users WHERE username = ?")
+        .bind(username).first();
 
       if (!user) return Response.json({ error: "Invalid credentials" }, { status: 401, headers: corsHeaders });
+      
+      // Perform inline parametric validation pass
+      const isValidPassword = await verifyPasswordAgainstBlock(password, user.password_auth_block);
+      if (!isValidPassword) return Response.json({ error: "Invalid credentials" }, { status: 401, headers: corsHeaders });
+      
       if (user.email_verified === 0) return Response.json({ error: "Access Denied. Verify your email ownership first." }, { status: 403, headers: corsHeaders });
       if (user.approved === 0) return Response.json({ error: "Email verified! Awaiting Admin approval." }, { status: 403, headers: corsHeaders });
 
-      const token = btoa(JSON.stringify({ username: user.username, role: user.role, stamp: Date.now() }));
-      return Response.json({ token, user: { username: user.username, role: user.role } }, { headers: corsHeaders });
+      const token = btoa(JSON.stringify({ username, role: user.role, stamp: Date.now() }));
+      return Response.json({ token, user: { username, role: user.role } }, { headers: corsHeaders });
     }
 
     // --- 4. IDENTITY PROTECTION MIDDLEWARE ---
@@ -177,7 +177,7 @@ export default {
       return Response.json({ success: true }, { headers: corsHeaders });
     }
 
-    // --- 6. CORE ATTRIBUTE SEARCH ENGINE ---
+    // --- 6. CORE VULNERABILITY ATTRIBUTE ENGINE ---
     const make = url.searchParams.get("make"); const model = url.searchParams.get("model"); const firmware = url.searchParams.get("firmware");
     if (make && model) {
       const cleanMake = make.toLowerCase().replace(/[-_\s]/g, ""); const cleanModel = model.toLowerCase().replace(/[-_\s]/g, "");
