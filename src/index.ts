@@ -1,10 +1,10 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 11.0 (True Multi-Stage Verification & Modular Sandbox Engine)
+ * Version: 11.1 (True Multi-Stage Verification & Modular Sandbox Engine)
  */
 
-//  To this (it tells the bundler to look at your local crypto.ts file):
-import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto";
+// CRITICAL COMPILER FIX: Explicitly append the '.ts' extension for Cloudflare automated repository builds
+import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto.ts";
 import { updateNVDIncremental } from "./updateNVD";
 import { backfillNVD } from "./backfillNVD";
 import { syncKevData } from "./updateKEV";
