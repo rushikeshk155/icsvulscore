@@ -1,6 +1,6 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 8.5 (Strict 15-Minute Expiration Verification Defenses)
+ * Version: 8.7 (URL Encoded Resilient Token Verification Delivery)
  */
 
 import { updateNVDIncremental } from "./updateNVD";
@@ -35,17 +35,18 @@ export default {
 
     // --- 1. EMAIL VERIFICATION CLICK CAPTURE ROUTE ---
     if (url.pathname === "/auth/verify") {
-      const token = url.searchParams.get("token");
-      if(!token) return new Response("Missing activation token link payload.", { status: 400 });
+      const rawToken = url.searchParams.get("token");
+      if(!rawToken) return new Response("Missing activation token link payload.", { status: 400 });
       
       try {
+        // Safe conversion step: Translate url component formatting sequences cleanly back to regular strings
+        const token = decodeURIComponent(rawToken);
         const decoded = JSON.parse(atob(token));
         if(decoded.secret !== SECRET_CRYPTO_KEY) throw new Error("Invalid signatures.");
 
-        // IEC 62443 Hardened Policy: Enforce strict 15-Minute Expiration Gate (15 mins * 60 secs * 1000 ms)
+        // Enforce strict 15-Minute Expiration Gate (15 mins * 60 secs * 1000 ms)
         const fifteenMinutesInMs = 15 * 60 * 1000;
         if (Date.now() - decoded.stamp > fifteenMinutesInMs) {
-          // If expired, clean out the record so they can immediately reuse their chosen username to retry
           await env.DB.prepare("DELETE FROM users WHERE username = ? AND email_verified = 0").bind(decoded.username).run();
           
           return new Response(`
@@ -58,20 +59,18 @@ export default {
           `, { status: 400, headers: { "Content-Type": "text/html" } });
         }
 
-        // Successfully update verified state
-        await env.DB.prepare("UPDATE users SET email_verified = 1 WHERE username = ?")
-          .bind(decoded.username).run();
+        await env.DB.prepare("UPDATE users SET email_verified = 1 WHERE username = ?").bind(decoded.username).run();
 
         return new Response(`
           <html>
             <body style="font-family:sans-serif; background:#0b1120; color:#34d399; text-align:center; padding-top:100px;">
               <h2>✓ Email Address Verified</h2>
-              <p style="color:#94a3b8; font-size:14px;">Your registration has been forwarded to the Super Admin queue for operational deployment authorization.</p>
+              <p style="color:#94a3b8; font-size:14px;">Your registration has been forwarded to the Super Admin queue for authorization.</p>
             </body>
           </html>
         `, { headers: { "Content-Type": "text/html" } });
       } catch(e) {
-        return new Response("Verification Token Corrupted or Compromised.", { status: 400 });
+        return new Response("Verification Token Corrupted or Altered.", { status: 400 });
       }
     }
 
@@ -95,11 +94,12 @@ export default {
           .bind(username, pwdHash, email, role, approved, emailVerified).run();
           
         const activationToken = btoa(JSON.stringify({ username, secret: SECRET_CRYPTO_KEY, stamp: Date.now() }));
-        const activationLink = `${url.origin}/auth/verify?token=${activationToken}`;
+        // CRITICAL FIX: Wrapped inside encodeURIComponent to insulate token payload strings inside query chains safely
+        const activationLink = `${url.origin}/auth/verify?token=${encodeURIComponent(activationToken)}`;
 
         return Response.json({ success: true, activationLink }, { headers: corsHeaders });
       } catch (e) {
-        return Response.json({ error: "Username or Email already exists. If your previous verification link expired, wait or use a unique name." }, { status: 400, headers: corsHeaders });
+        return Response.json({ error: "Username or Email already exists." }, { status: 400, headers: corsHeaders });
       }
     }
 
@@ -128,7 +128,7 @@ export default {
     try { if (authHeader.startsWith("Bearer ")) tokenPayload = JSON.parse(atob(authHeader.substring(7))); } catch(e) {}
     if (!tokenPayload && url.searchParams.has("make")) return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
 
-    // --- 4. EXCLUSIVE ADMINISTRATIVE CONTROL ROUTING ---
+    // --- 4. ADMINISTRATIVE CONTROL ROUTING ---
     if (url.pathname === "/admin/pending") {
       if (!tokenPayload || tokenPayload.role !== 'admin') return Response.json({ error: "Forbidden" }, { status: 403, headers: corsHeaders });
       const pending = await env.DB.prepare("SELECT id, username, email FROM users WHERE approved = 0 AND email_verified = 1").all();
@@ -155,7 +155,7 @@ export default {
       return Response.json({ success: true }, { headers: corsHeaders });
     }
 
-    // --- 5. SEARCH ENGINE (STRICT ATTRIBUTE MATCHING) ---
+    // --- 5. SEARCH ENGINE ---
     const make = url.searchParams.get("make"); const model = url.searchParams.get("model"); const firmware = url.searchParams.get("firmware");
     if (make && model) {
       const cleanMake = make.toLowerCase().replace(/[-_\s]/g, ""); const cleanModel = model.toLowerCase().replace(/[-_\s]/g, "");
@@ -172,7 +172,7 @@ export default {
       catch (err: any) { return Response.json({ error: "Database failure" }, { status: 500, headers: corsHeaders }); }
     }
 
-    // --- 6. BACKGROUND SYNC CONTROLS ---
+    // --- 6. BACKGROUND MAINTENANCE PIPELINES ---
     if (url.pathname === "/sync-incremental") { await updateNVDIncremental(env); return new Response("Done."); }
     if (url.pathname === "/backfill-execute") { await backfillNVD(env); return new Response("Running."); }
     if (url.pathname === "/sync-kev") { await syncKevData(env); return new Response("Updated KEV."); }
