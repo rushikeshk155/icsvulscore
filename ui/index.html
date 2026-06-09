@@ -179,8 +179,7 @@
                 if(!res.ok) throw new Error(data.error || "Authentication failed");
 
                 if (!isLoginMode) {
-                    // SECURE ENHANCEMENT: Hide verification data entirely from the visual window layers
-                    showMessage("Account initialization successful! A secure activation dispatch link has been transmitted directly to your corporate inbox. Validate it within 15 minutes to join the authorization queue.");
+                    showMessage("Account initialization successful! A secure activation link has been sent directly to your corporate inbox. Verify it within 15 minutes to join the authorization queue.");
                     toggleAuthMode();
                 } else {
                     currentUser = data.user; currentToken = data.token;
