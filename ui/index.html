@@ -26,15 +26,17 @@
                     <label class="block text-[10px] font-mono uppercase text-slate-400 mb-2">Username / Login ID</label>
                     <input type="text" id="authUsername" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors">
                 </div>
-                <div id="emailFieldContainer" class="hidden">
+                
+                <div id="emailFieldContainer" class="hidden transition-all duration-200">
                     <label class="block text-[10px] font-mono uppercase text-slate-400 mb-2">Corporate Email Address</label>
                     <input type="email" id="authEmail" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors" placeholder="operator@company.com">
                 </div>
+                
                 <div>
                     <label class="block text-[10px] font-mono uppercase text-slate-400 mb-2">Password</label>
                     <input type="password" id="authPassword" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors">
                     <p id="passwordHint" class="hidden text-[9px] text-slate-500 mt-2 font-mono leading-relaxed">
-                        ⚠️ <span class="text-blue-400 font-bold">Password Policy:</span> Min 10 chars, including uppercase, lowercase, numeric, and a special character.
+                        ⚠️ <span class="text-blue-400 font-bold">IEC 62443 Policy:</span> Min 10 chars, including uppercase, lowercase, numeric, and a special character.
                     </p>
                 </div>
                 
@@ -43,11 +45,11 @@
                 </button>
                 
                 <div class="text-center mt-6">
-                    <button onclick="toggleAuthMode()" id="authToggleBtn" class="text-[10px] text-slate-500 hover:text-blue-400 font-mono uppercase tracking-widest transition-colors">
+                    <button onclick="toggleAuthMode()" id="authToggleBtn" class="text-[10px] text-blue-400 hover:text-blue-300 font-mono uppercase tracking-widest transition-colors cursor-pointer">
                         Need an account? Register Here
                     </button>
                 </div>
-                <div id="authMessage" class="text-center text-xs font-mono mt-4 hidden p-3 rounded-xl bg-slate-950/50 border border-slate-800/40 text-wrap break-all"></div>
+                <div id="authMessage" class="text-center text-xs font-mono mt-4 hidden p-3 rounded-xl bg-slate-950/50 border border-slate-800/40 text-wrap break-all select-all"></div>
             </div>
         </div>
     </div>
@@ -58,7 +60,7 @@
             <div class="flex justify-between items-center mb-6">
                 <div>
                     <h3 class="text-sm font-black text-white uppercase tracking-wider italic">Master Authorization Center</h3>
-                    <p class="text-xs text-slate-400">Approve users who have fully verified their email addresses.</p>
+                    <p class="text-xs text-slate-400">Approve users who have fully verified their email addresses within the 15-minute lease.</p>
                 </div>
                 <button onclick="loadUserManagementQueue()" class="text-[9px] font-mono uppercase tracking-widest bg-slate-800 border border-slate-700 px-3 py-1.5 rounded hover:text-blue-400 transition-colors">Refresh Queue</button>
             </div>
@@ -67,7 +69,7 @@
                 <div>
                     <h4 class="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2">Pending Access Requests (Email Verified)</h4>
                     <div id="pendingUsersList" class="space-y-2 max-h-48 overflow-y-auto pr-2">
-                        <p class="text-xs text-slate-600 italic font-mono">No pending requests.</p>
+                        <p class="text-xs text-slate-600 italic font-mono">No pending requests matching requirements.</p>
                     </div>
                 </div>
                 <div>
@@ -137,6 +139,7 @@
             
             const hint = document.getElementById('passwordHint');
             const emailContainer = document.getElementById('emailFieldContainer');
+            
             if (isLoginMode) {
                 hint.classList.add('hidden');
                 emailContainer.classList.add('hidden');
@@ -176,4 +179,104 @@
                 if(!res.ok) throw new Error(data.error || "Authentication failed");
 
                 if (!isLoginMode) {
-                    showMessage(`Account Created! The 15-minute verification window has started.\n\nActivation Link:\
+                    showMessage(`Account Created! The 15-minute verification link is ready.\n\nCopy & Paste Link To Verify:\n\n${data.activationLink}`);
+                } else {
+                    currentUser = data.user; currentToken = data.token;
+                    document.getElementById('authPortal').classList.add('hidden');
+                    document.getElementById('appDashboard').classList.remove('opacity-20', 'pointer-events-none');
+                    document.getElementById('userBadge').innerText = `User: ${currentUser.username} (${currentUser.role})`;
+
+                    if(currentUser.role === 'admin') {
+                        document.getElementById('adminPanel').classList.remove('hidden');
+                        loadUserManagementQueue();
+                    }
+                }
+            } catch (err) { showMessage(err.message, true); }
+        }
+
+        async function loadUserManagementQueue() {
+            try {
+                const resPending = await fetch(`${WORKER_URL}/admin/pending`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
+                const pending = await resPending.json();
+                const pContainer = document.getElementById('pendingUsersList');
+                pContainer.innerHTML = "";
+                
+                if(pending.length === 0) {
+                    pContainer.innerHTML = `<p class="text-xs text-slate-600 italic font-mono">No pending requests matching requirements.</p>`;
+                } else {
+                    pending.forEach(u => {
+                        pContainer.innerHTML += `
+                            <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                                <span class="text-xs font-mono text-slate-300">${u.username} <span class="text-[9px] text-slate-500">(${u.email})</span></span>
+                                <button onclick="approveUser(${u.id})" class="text-[9px] font-bold bg-green-600/20 text-green-400 hover:bg-green-600 hover:text-white border border-green-500/20 px-3 py-1 rounded">Approve</button>
+                            </div>
+                        `;
+                    });
+                }
+
+                const resActive = await fetch(`${WORKER_URL}/admin/active-users`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
+                const active = await resActive.json();
+                const aContainer = document.getElementById('activeUsersList');
+                aContainer.innerHTML = "";
+
+                active.forEach(u => {
+                    const isAdmin = u.role === 'admin';
+                    aContainer.innerHTML += `
+                        <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                            <div><span class="text-xs font-mono text-slate-300">${u.username}</span><span class="text-[8px] font-mono text-slate-500 uppercase ml-2">[${u.role}]</span></div>
+                            ${!isAdmin ? `<button onclick="promoteUser(${u.id})" class="text-[9px] font-bold bg-blue-600/20 text-blue-400 border border-blue-500/20 px-3 py-1 rounded">Make Admin</button>` : `<span class="text-[8px] text-blue-500 uppercase font-mono mr-2">Authorized</span>`}
+                        </div>
+                    `;
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        async function approveUser(userId) {
+            if(await fetch(`${WORKER_URL}/admin/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` }, body: JSON.stringify({ id: userId }) })) loadUserManagementQueue();
+        }
+        async function promoteUser(userId) {
+            if(await fetch(`${WORKER_URL}/admin/promote`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` }, body: JSON.stringify({ id: userId }) })) loadUserManagementQueue();
+        }
+        function logout() { window.location.reload(); }
+
+        async function runAudit() {
+            const fileInput = document.getElementById('csvFile'); if (!fileInput.files[0]) return alert("Upload asset inventory CSV.");
+            const table = document.getElementById('auditTable'); const status = document.getElementById('status');
+            table.innerHTML = ""; resultsData = []; status.classList.remove('hidden');
+
+            Papa.parse(fileInput.files[0], {
+                header: true, skipEmptyLines: true,
+                complete: async function(results) {
+                    const assets = results.data;
+                    for (let i = 0; i < assets.length; i++) {
+                        const asset = assets[i]; const fw = asset.Firmware || asset.firmware || "";
+                        try {
+                            const res = await fetch(`${WORKER_URL}/?make=${encodeURIComponent(asset.Make)}&model=${encodeURIComponent(asset.Model)}&firmware=${encodeURIComponent(fw)}`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
+                            const data = await res.json(); const top = data.vulnerabilities[0] || {};
+                            const entry = { Asset_ID: asset.Asset_ID || 'N/A', Make: asset.Make, Model: asset.Model, Firmware: fw, Max_CVE_ID: top.cve_id || 'NONE', Risk_Score: top.ics_weighted_score || 0, Tactic: top.tactic || 'NONE' };
+                            resultsData.push(entry); renderRow(entry);
+                        } catch (err) { console.error(err); }
+                    }
+                    status.classList.add('hidden');
+                    document.getElementById('reportArea').classList.remove('hidden');
+                }
+            });
+        }
+
+        function renderRow(r) {
+            let scoreColor = "text-slate-500"; let cveColor = "text-slate-400";
+            if (r.Risk_Score >= 9) { scoreColor = "text-red-500 font-black"; cveColor = "text-red-400 font-semibold"; }
+            else if (r.Risk_Score >= 7) { scoreColor = "text-orange-500 font-bold"; cveColor = "text-orange-400"; }
+            document.getElementById('auditTable').innerHTML += `
+                <tr class="border-t border-slate-800/50 hover:bg-blue-500/5 text-xs">
+                    <td class="p-5"><strong>${r.Asset_ID}</strong><br><span class="text-[9px] text-slate-500 font-mono">${r.Make} ${r.Model}</span></td>
+                    <td class="p-5 text-center font-mono text-blue-400">${r.Firmware || 'ANY'}</td>
+                    <td class="p-5 text-center font-mono ${cveColor}">${r.Max_CVE_ID}</td>
+                    <td class="p-5 text-center border-x border-slate-800/50 ${scoreColor} font-bold text-base">${r.Risk_Score > 0 ? r.Risk_Score : '--'}</td>
+                    <td class="p-5 text-right"><span class="text-[9px] bg-slate-800 border px-2 py-0.5 rounded text-slate-500 font-mono">${r.Tactic}</span></td>
+                </tr>
+            `;
+        }
+    </script>
+</body>
+</html>
