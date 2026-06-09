@@ -3,6 +3,7 @@
  * Version: 11.0 (True Multi-Stage Verification & Modular Sandbox Engine)
  */
 
+//  To this (it tells the bundler to look at your local crypto.ts file):
 import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto";
 import { updateNVDIncremental } from "./updateNVD";
 import { backfillNVD } from "./backfillNVD";
