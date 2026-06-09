@@ -1,6 +1,6 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 4.5 (Structured Only - Zero False Positives)
+ * Version: 5.0 (Strict Column Mapping Only)
  */
 
 import { updateNVDIncremental } from "./updateNVD";
@@ -24,22 +24,25 @@ export default {
       });
     }
 
-    // --- 1. SEARCH API ENGINE (STRUCTURED CPE ONLY) ---
+    // --- 1. SEARCH API ENGINE (STRICT ATTRIBUTE MATCHING) ---
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
     const firmware = url.searchParams.get("firmware");
     
     if (make && model) {
+      // Normalize values by removing spaces, dashes, and underscores
       const cleanMake = make.toLowerCase().replace(/[-_\s]/g, "");
       const cleanModel = model.toLowerCase().replace(/[-_\s]/g, "");
+      
+      // Pull out the primary number group (e.g., "1200" or "5570") to ensure a flexible family link
       const modelNumberMatch = model.match(/\d+/);
       const modelNumStr = modelNumberMatch ? modelNumberMatch[0] : cleanModel;
 
-      // Rigid structured query targeting exact CPE properties only
       let query = `
         SELECT 
           c.cve_id, 
           c.cvss_score,
+          -- COMPUTE FINAL ICS WEIGHTED SCORE
           MIN(10.0, c.cvss_score + 
             (CASE WHEN k.cve_id IS NOT NULL THEN 2.0 ELSE 0.0 END) + 
             (CASE WHEN at.tactic IN ('impact', 'inhibit response function') THEN 1.5 ELSE 0.0 END)
@@ -48,14 +51,17 @@ export default {
           IFNULL(at.tactic, 'NONE') as tactic, 
           at.name as technique_name,
           CASE WHEN k.cve_id IS NOT NULL THEN 1 ELSE 0 END as is_kev,
-          IFNULL(k.required_action, 'Refer to vendor security advisory for mitigation guidance.') as mitigation
+          IFNULL(k.required_action, 'Refer to vendor security advisory.') as mitigation
         FROM cves c 
         JOIN cve_cpe_mapping m ON c.cve_id = m.cve_id 
         LEFT JOIN cve_attack_mapping cam ON c.cve_id = cam.cve_id
         LEFT JOIN attack_techniques at ON cam.technique_id = at.technique_id
         LEFT JOIN cisa_kev k ON c.cve_id = k.cve_id
         WHERE 
+          -- 1. Match the Device 'Make'
           REPLACE(REPLACE(REPLACE(LOWER(m.make), '-', ''), ' ', ''), '_', '') LIKE ? 
+          
+          -- 2. Match the Device 'Model'
           AND (
             REPLACE(REPLACE(REPLACE(LOWER(m.model), '-', ''), ' ', ''), '_', '') LIKE ?
             OR m.model LIKE ?
@@ -64,22 +70,33 @@ export default {
 
       const params: any[] = ["%" + cleanMake + "%", "%" + cleanModel + "%", "%" + modelNumStr + "%"];
 
-      // Handle firmware/wildcard tracking safely
+      // 3. Match the Device 'Firmware' (If provided and not a wildcard)
       if (firmware && firmware.trim() !== "" && firmware !== "null" && firmware !== "*") {
         const cleanFw = firmware.replace(/[*]/g, "").trim().toLowerCase();
-        // Match exact firmware string, or blanket wildcard fields, or catch range entries safely
-        query += ` AND (m.firmware LIKE ? OR m.firmware = '*' OR m.firmware = 'all' OR m.firmware LIKE ? )`;
+        
+        // Strip down trailing decimals if the user provided a generic major version string like "4.1.*"
+        const majorFw = cleanFw.split('.')[0]; 
+
+        query += ` 
+          AND (
+            m.firmware LIKE ? 
+            OR m.firmware LIKE ? 
+            OR m.firmware = '*' 
+            OR m.firmware = 'all'
+          )
+        `;
         params.push("%" + cleanFw + "%");
-        params.push(cleanFw.split('.')[0] + ".%"); // If user types 4.8.*, matches 4.8.%
+        params.push(majorFw + ".%");
       }
 
-      query += ` GROUP BY c.cve_id ORDER BY ics_weighted_score DESC, is_kev DESC`;
+      // 4. Sort results explicitly by the Maximum Score to put the largest threat at index 0
+      query += ` GROUP BY c.cve_id ORDER BY ics_weighted_score DESC, cvss_score DESC`;
 
       try {
         const data = await env.DB.prepare(query).bind(...params).all();
         
         return Response.json({ 
-          count: data.results.length, 
+          count: data.results.length,
           vulnerabilities: data.results 
         }, {
           headers: { 
@@ -88,19 +105,19 @@ export default {
           }
         });
       } catch (err: any) {
-        return Response.json({ error: "Database Execution Error", details: err.message }, { status: 500 });
+        return Response.json({ error: "Database Query Failure", details: err.message }, { status: 500 });
       }
     }
 
-    // --- 2. ADMINISTRATIVE SYNC MAINTENANCE ROUTES ---
+    // --- 2. ADMINISTRATIVE SYNC PIPELINE CONTROL ---
     if (url.pathname === "/sync-attack-library") {
       await syncAttackTechniques(env);
-      return new Response("MITRE ATT&CK Matrix synchronized.");
+      return new Response("MITRE Matrix synced.");
     }
 
     if (url.pathname === "/sync-kev") {
       await syncKevData(env);
-      return new Response("CISA Known Exploited Vulnerabilities table refreshed.");
+      return new Response("CISA KEV updated.");
     }
 
     if (url.pathname === "/backfill-attack") {
@@ -110,12 +127,12 @@ export default {
 
     if (url.pathname === "/sync-incremental") {
       await updateNVDIncremental(env);
-      return new Response("Daily incremental NVD sync processed.");
+      return new Response("Incremental NVD sync completed.");
     }
 
     if (url.pathname === "/backfill-execute") {
       await backfillNVD(env);
-      return new Response("NVD Batch backfill routine initiated.");
+      return new Response("Batch NVD backfill running.");
     }
 
     // --- 3. INFRASTRUCTURE HEALTH TRACKING ---
@@ -130,9 +147,7 @@ export default {
       return Response.json(stats);
     }
 
-    return new Response("ICS Vuln Intelligence API Engine Core Active.", {
-      headers: { "Content-Type": "text/plain" }
-    });
+    return new Response("ICS API Online.", { headers: { "Content-Type": "text/plain" } });
   },
 
   async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
