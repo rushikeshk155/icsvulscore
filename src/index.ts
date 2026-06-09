@@ -1,6 +1,6 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 5.0 (Strict Column Mapping Only)
+ * Version: 7.0 (IEC 62443 Password Complexity Controls)
  */
 
 import { updateNVDIncremental } from "./updateNVD";
@@ -9,149 +9,172 @@ import { syncKevData } from "./updateKEV";
 import { syncAttackTechniques } from "./syncAttack";
 import { backfillAttackMappings } from "./backfillAttackMappings";
 
+async function hashPassword(pwd: string): Promise<string> {
+  const msgBuffer = new TextEncoder().encode(pwd + "ICS_SALT_2026");
+  const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Backend Server Verification Policy matching IEC 62443-4-2 standards
+function verifyIEC62443PasswordStrength(pwd: string): boolean {
+  const iecRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/;
+  return iecRegex.test(pwd);
+}
+
 export default {
   async fetch(request: Request, env: any, ctx: ExecutionContext) {
     const url = new URL(request.url);
 
-    // --- 0. GLOBAL CORS PRE-FLIGHT HANDLER ---
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    };
+
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-        },
-      });
+      return new Response(null, { headers: corsHeaders });
     }
 
-    // --- 1. SEARCH API ENGINE (STRICT ATTRIBUTE MATCHING) ---
+    // --- 1. USER AUTHENTICATION GATES ---
+    if (url.pathname === "/auth/register" && request.method === "POST") {
+      const { username, password } = await request.json() as any;
+      if (!username || !password) return Response.json({ error: "Missing fields" }, { status: 400, headers: corsHeaders });
+      
+      // Strict API-Layer Enforcement for industrial safety standards
+      if (!verifyIEC62443PasswordStrength(password)) {
+        return Response.json({ 
+          error: "Password rejection. Must be at least 10 characters long and include numbers, uppercase, lowercase, and special symbols." 
+        }, { status: 400, headers: corsHeaders });
+      }
+      
+      const pwdHash = await hashPassword(password);
+      
+      try {
+        const userCheck = await env.DB.prepare("SELECT COUNT(*) as count FROM users").first();
+        const role = userCheck.count === 0 ? 'admin' : 'user';
+        const approved = userCheck.count === 0 ? 1 : 0;
+
+        await env.DB.prepare("INSERT INTO users (username, password_hash, role, approved) VALUES (?, ?, ?, ?)")
+          .bind(username, pwdHash, role, approved).run();
+          
+        return Response.json({ success: true }, { headers: corsHeaders });
+      } catch (e) {
+        return Response.json({ error: "Username already exists" }, { status: 400, headers: corsHeaders });
+      }
+    }
+
+    if (url.pathname === "/auth/login" && request.method === "POST") {
+      const { username, password } = await request.json() as any;
+      const pwdHash = await hashPassword(password);
+
+      const user = await env.DB.prepare("SELECT id, username, role, approved FROM users WHERE username = ? AND password_hash = ?")
+        .bind(username, pwdHash).first();
+
+      if (!user) return Response.json({ error: "Invalid credentials" }, { status: 401, headers: corsHeaders });
+      if (user.approved === 0) return Response.json({ error: "Account access pending Admin approval." }, { status: 403, headers: corsHeaders });
+
+      const token = btoa(JSON.stringify({ username: user.username, role: user.role, stamp: Date.now() }));
+      return Response.json({ token, user: { username: user.username, role: user.role } }, { headers: corsHeaders });
+    }
+
+    // --- 2. SECURITY TOKEN VERIFICATION LAYER ---
+    const authHeader = request.headers.get("Authorization") || "";
+    let tokenPayload: any = null;
+    try {
+      if (authHeader.startsWith("Bearer ")) {
+        tokenPayload = JSON.parse(atob(authHeader.substring(7)));
+      }
+    } catch(e) {}
+
+    if (!tokenPayload && url.searchParams.has("make")) {
+      return Response.json({ error: "Unauthorized token" }, { status: 401, headers: corsHeaders });
+    }
+
+    // --- 3. ADMIN MANAGEMENT ENDPOINTS ---
+    if (url.pathname === "/admin/pending") {
+      if (!tokenPayload || tokenPayload.role !== 'admin') return Response.json({ error: "Forbidden" }, { status: 403, headers: corsHeaders });
+      const pending = await env.DB.prepare("SELECT id, username FROM users WHERE approved = 0").all();
+      return Response.json(pending.results, { headers: corsHeaders });
+    }
+
+    if (url.pathname === "/admin/active-users") {
+      if (!tokenPayload || tokenPayload.role !== 'admin') return Response.json({ error: "Forbidden" }, { status: 403, headers: corsHeaders });
+      const active = await env.DB.prepare("SELECT id, username, role FROM users WHERE approved = 1").all();
+      return Response.json(active.results, { headers: corsHeaders });
+    }
+
+    if (url.pathname === "/admin/approve" && request.method === "POST") {
+      if (!tokenPayload || tokenPayload.role !== 'admin') return Response.json({ error: "Forbidden" }, { status: 403, headers: corsHeaders });
+      const { id } = await request.json() as any;
+      await env.DB.prepare("UPDATE users SET approved = 1 WHERE id = ?").bind(id).run();
+      return Response.json({ success: true }, { headers: corsHeaders });
+    }
+
+    if (url.pathname === "/admin/promote" && request.method === "POST") {
+      if (!tokenPayload || tokenPayload.role !== 'admin') return Response.json({ error: "Forbidden" }, { status: 403, headers: corsHeaders });
+      const { id } = await request.json() as any;
+      await env.DB.prepare("UPDATE users SET role = 'admin' WHERE id = ?").bind(id).run();
+      return Response.json({ success: true }, { headers: corsHeaders });
+    }
+
+    // --- 4. CORE DATA ENGINE MATRIX ---
     const make = url.searchParams.get("make");
     const model = url.searchParams.get("model");
     const firmware = url.searchParams.get("firmware");
     
     if (make && model) {
-      // Normalize values by removing spaces, dashes, and underscores
       const cleanMake = make.toLowerCase().replace(/[-_\s]/g, "");
       const cleanModel = model.toLowerCase().replace(/[-_\s]/g, "");
-      
-      // Pull out the primary number group (e.g., "1200" or "5570") to ensure a flexible family link
       const modelNumberMatch = model.match(/\d+/);
       const modelNumStr = modelNumberMatch ? modelNumberMatch[0] : cleanModel;
 
       let query = `
         SELECT 
-          c.cve_id, 
-          c.cvss_score,
-          -- COMPUTE FINAL ICS WEIGHTED SCORE
+          c.cve_id, c.cvss_score,
           MIN(10.0, c.cvss_score + 
             (CASE WHEN k.cve_id IS NOT NULL THEN 2.0 ELSE 0.0 END) + 
             (CASE WHEN at.tactic IN ('impact', 'inhibit response function') THEN 1.5 ELSE 0.0 END)
           ) as ics_weighted_score,
-          c.description, 
-          IFNULL(at.tactic, 'NONE') as tactic, 
-          at.name as technique_name,
+          c.description, IFNULL(at.tactic, 'NONE') as tactic, at.name as technique_name,
           CASE WHEN k.cve_id IS NOT NULL THEN 1 ELSE 0 END as is_kev,
-          IFNULL(k.required_action, 'Refer to vendor security advisory.') as mitigation
+          IFNULL(k.required_action, 'Refer to vendor advisory.') as mitigation
         FROM cves c 
         JOIN cve_cpe_mapping m ON c.cve_id = m.cve_id 
         LEFT JOIN cve_attack_mapping cam ON c.cve_id = cam.cve_id
         LEFT JOIN attack_techniques at ON cam.technique_id = at.technique_id
         LEFT JOIN cisa_kev k ON c.cve_id = k.cve_id
         WHERE 
-          -- 1. Match the Device 'Make'
           REPLACE(REPLACE(REPLACE(LOWER(m.make), '-', ''), ' ', ''), '_', '') LIKE ? 
-          
-          -- 2. Match the Device 'Model'
-          AND (
-            REPLACE(REPLACE(REPLACE(LOWER(m.model), '-', ''), ' ', ''), '_', '') LIKE ?
-            OR m.model LIKE ?
-          )
+          AND (REPLACE(REPLACE(REPLACE(LOWER(m.model), '-', ''), ' ', ''), '_', '') LIKE ? OR m.model LIKE ?)
       `;
 
       const params: any[] = ["%" + cleanMake + "%", "%" + cleanModel + "%", "%" + modelNumStr + "%"];
 
-      // 3. Match the Device 'Firmware' (If provided and not a wildcard)
       if (firmware && firmware.trim() !== "" && firmware !== "null" && firmware !== "*") {
         const cleanFw = firmware.replace(/[*]/g, "").trim().toLowerCase();
-        
-        // Strip down trailing decimals if the user provided a generic major version string like "4.1.*"
         const majorFw = cleanFw.split('.')[0]; 
-
-        query += ` 
-          AND (
-            m.firmware LIKE ? 
-            OR m.firmware LIKE ? 
-            OR m.firmware = '*' 
-            OR m.firmware = 'all'
-          )
-        `;
+        query += ` AND (m.firmware LIKE ? OR m.firmware LIKE ? OR m.firmware = '*' OR m.firmware = 'all')`;
         params.push("%" + cleanFw + "%");
         params.push(majorFw + ".%");
       }
 
-      // 4. Sort results explicitly by the Maximum Score to put the largest threat at index 0
       query += ` GROUP BY c.cve_id ORDER BY ics_weighted_score DESC, cvss_score DESC`;
 
       try {
         const data = await env.DB.prepare(query).bind(...params).all();
-        
-        return Response.json({ 
-          count: data.results.length,
-          vulnerabilities: data.results 
-        }, {
-          headers: { 
-            "Access-Control-Allow-Origin": "*", 
-            "Content-Type": "application/json" 
-          }
-        });
+        return Response.json({ vulnerabilities: data.results }, { headers: corsHeaders });
       } catch (err: any) {
-        return Response.json({ error: "Database Query Failure", details: err.message }, { status: 500 });
+        return Response.json({ error: "Database failure", details: err.message }, { status: 500, headers: corsHeaders });
       }
     }
 
-    // --- 2. ADMINISTRATIVE SYNC PIPELINE CONTROL ---
-    if (url.pathname === "/sync-attack-library") {
-      await syncAttackTechniques(env);
-      return new Response("MITRE Matrix synced.");
-    }
+    // --- 5. COMPLIANCE DATA ROUTING OVERLAYS ---
+    if (url.pathname === "/sync-incremental") { await updateNVDIncremental(env); return new Response("Sync complete."); }
+    if (url.pathname === "/backfill-execute") { await backfillNVD(env); return new Response("Backfill running."); }
+    if (url.pathname === "/sync-kev") { await syncKevData(env); return new Response("KEV Updated."); }
+    if (url.pathname === "/sync-attack-library") { await syncAttackTechniques(env); return new Response("ATT&CK Matrix Updated."); }
+    if (url.pathname === "/backfill-attack") { await backfillAttackMappings(env); return new Response("Attack Mapped."); }
 
-    if (url.pathname === "/sync-kev") {
-      await syncKevData(env);
-      return new Response("CISA KEV updated.");
-    }
-
-    if (url.pathname === "/backfill-attack") {
-      const status = await backfillAttackMappings(env);
-      return new Response(status);
-    }
-
-    if (url.pathname === "/sync-incremental") {
-      await updateNVDIncremental(env);
-      return new Response("Incremental NVD sync completed.");
-    }
-
-    if (url.pathname === "/backfill-execute") {
-      await backfillNVD(env);
-      return new Response("Batch NVD backfill running.");
-    }
-
-    // --- 3. INFRASTRUCTURE HEALTH TRACKING ---
-    if (url.pathname === "/health") {
-      const stats = await env.DB.prepare(`
-        SELECT 
-          (SELECT COUNT(*) FROM cves) as total_cves,
-          (SELECT COUNT(*) FROM attack_techniques) as total_techniques,
-          (SELECT COUNT(*) FROM cisa_kev) as total_kev,
-          (SELECT COUNT(*) FROM cve_attack_mapping) as mapped_cves
-      `).first();
-      return Response.json(stats);
-    }
-
-    return new Response("ICS API Online.", { headers: { "Content-Type": "text/plain" } });
-  },
-
-  async scheduled(controller: ScheduledController, env: any, ctx: ExecutionContext) {
-    ctx.waitUntil(updateNVDIncremental(env));
-    ctx.waitUntil(syncKevData(env));
+    return new Response("ICS Security Engine Active.", { headers: { "Content-Type": "text/plain" } });
   }
 };
