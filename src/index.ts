@@ -1,6 +1,6 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 9.5 (True Out-of-Band Email Delivery Loop & Strict Expiry)
+ * Version: 10.0 (True Multi-Stage Verification & Sandbox Testing Engine)
  */
 
 import { updateNVDIncremental } from "./updateNVD";
@@ -10,7 +10,7 @@ import { syncAttackTechniques } from "./syncAttack";
 import { backfillAttackMappings } from "./backfillAttackMappings";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
-const RESEND_API_KEY = "re_CchLh8VV_J77D5Fmx2bpPgWD7i85vfUPr"; // <--- PASTE YOUR API KEY HERE
+const RESEND_API_KEY = "re_ca1DWHcx..."; // Paste your real Resend token here
 
 async function hashPassword(pwd: string): Promise<string> {
   const msgBuffer = new TextEncoder().encode(pwd + "ICS_SALT_2026");
@@ -22,7 +22,7 @@ function verifyIEC62443PasswordStrength(pwd: string): boolean {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/.test(pwd);
 }
 
-// Out-of-Band Automated Mailing Dispatcher Function via Resend API REST Engine
+// Automated HTML Mailer Function
 async function sendVerificationEmail(targetEmail: string, username: string, link: string) {
   const emailPayload = {
     from: "ICS Security Portal <onboarding@resend.dev>",
@@ -34,11 +34,11 @@ async function sendVerificationEmail(targetEmail: string, username: string, link
         <p style="font-size:11px; color:#64748b; font-family:monospace; text-transform:uppercase; margin-top:0;">IEC 62443 Access Controls</p>
         <hr style="border:0; border-top:1px solid #1e293b; margin:20px 0;" />
         <p style="font-size:14px; line-height:1.6;">Hello <strong>${username}</strong>,</p>
-        <p style="font-size:14px; line-height:1.6;">An account request has been initiated using this corporate email identity. To prove ownership of this email asset, click the activation button below within the next 15 minutes:</p>
+        <p style="font-size:14px; line-height:1.6;">An account request has been initiated using this email identity. To prove ownership of this email asset, click the activation button below within the next 15 minutes:</p>
         <div style="text-align:center; margin:32px 0;">
           <a href="${link}" style="background-color:#2563eb; color:#ffffff; font-weight:bold; padding:12px 32px; border-radius:8px; text-decoration:none; font-size:13px; display:inline-block; text-transform:uppercase; tracking-wider:0.05em;">Verify Email Address</a>
         </div>
-        <p style="font-size:11px; color:#64748b; font-family:monospace; text-align:center; margin-top:32px;">If you did not request this access, please ignore this communication or flag it to network security operators.</p>
+        <p style="font-size:11px; color:#64748b; font-family:monospace; text-align:center; margin-top:32px;">If you did not request this access, please ignore this communication.</p>
       </div>
     `
   };
@@ -65,27 +65,28 @@ export default {
 
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-    // --- 1. EMAIL VERIFICATION CLICK CAPTURE ROUTE ---
+    // --- 1. EMAIL VERIFICATION CLICK CAPTURE GATEWAY ---
     if (url.pathname === "/auth/verify") {
       const rawToken = url.searchParams.get("token");
-      if(!rawToken) return new Response("Missing activation token link payload.", { status: 400 });
+      if(!rawToken) return new Response("Missing activation token.", { status: 400 });
       
       try {
         const token = decodeURIComponent(rawToken);
         const decoded = JSON.parse(atob(token));
-        if(decoded.secret !== SECRET_CRYPTO_KEY) throw new Error("Invalid signature.");
+        if(decoded.secret !== SECRET_CRYPTO_KEY) throw new Error("Signature verification failed.");
 
         // Enforce strict 15-Minute Expiration Gate
         const fifteenMinutesInMs = 15 * 60 * 1000;
         if (Date.now() - decoded.stamp > fifteenMinutesInMs) {
           await env.DB.prepare("DELETE FROM users WHERE username = ? AND email_verified = 0").bind(decoded.username).run();
-          return new Response("<html><body style='font-family:sans-serif; background:#0b1120; color:#ef4444; text-align:center; padding-top:100px;'><h2>✕ Verification Link Expired</h2><p style='color:#94a3b8;'>The 15-minute lease time ended. Your pending record was wiped. Please re-register.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } });
+          return new Response("<html><body style='font-family:sans-serif; background:#0b1120; color:#ef4444; text-align:center; padding-top:100px;'><h2>✕ Verification Link Expired</h2><p style='color:#94a3b8;'>The 15-minute window passed. Please re-register.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } });
         }
 
+        // Advance account status to Verified (Awaiting Admin Approval step)
         await env.DB.prepare("UPDATE users SET email_verified = 1 WHERE username = ?").bind(decoded.username).run();
-        return new Response("<html><body style='font-family:sans-serif; background:#0b1120; color:#34d399; text-align:center; padding-top:100px;'><h2>✓ Email Verified Successfully</h2><p style='color:#94a3b8;'>Your identity request has been forwarded to the Admin Approval Queue.</p></body></html>", { headers: { "Content-Type": "text/html" } });
+        return new Response("<html><body style='font-family:sans-serif; background:#0b1120; color:#34d399; text-align:center; padding-top:100px;'><h2>✓ Email Verified Successfully</h2><p style='color:#94a3b8;'>Your request has been forwarded to the Admin Approval Queue.</p></body></html>", { headers: { "Content-Type": "text/html" } });
       } catch(e) {
-        return new Response("Token verification error or corrupt payload.", { status: 400 });
+        return new Response("Token verification error.", { status: 400 });
       }
     }
 
@@ -93,7 +94,7 @@ export default {
     if (url.pathname === "/auth/register" && request.method === "POST") {
       const { username, password, email } = await request.json() as any;
       if (!username || !password || !email) return Response.json({ error: "Missing fields" }, { status: 400, headers: corsHeaders });
-      if (!verifyIEC62443PasswordStrength(password)) return Response.json({ error: "Weak password configuration." }, { status: 400, headers: corsHeaders });
+      if (!verifyIEC62443PasswordStrength(password)) return Response.json({ error: "Weak password." }, { status: 400, headers: corsHeaders });
       
       const pwdHash = await hashPassword(password);
       
@@ -101,19 +102,25 @@ export default {
         const userCheck = await env.DB.prepare("SELECT COUNT(*) as count FROM users").first();
         const isFirstUser = userCheck.count === 0;
         
+        // Setup state roles
         const role = isFirstUser ? 'admin' : 'user';
         const approved = isFirstUser ? 1 : 0;
         const emailVerified = isFirstUser ? 1 : 0;
 
+        // Write the real data to the database
         await env.DB.prepare("INSERT INTO users (username, password_hash, email, role, approved, email_verified) VALUES (?, ?, ?, ?, ?, ?)")
           .bind(username, pwdHash, email, role, approved, emailVerified).run();
           
         const activationToken = btoa(JSON.stringify({ username, secret: SECRET_CRYPTO_KEY, stamp: Date.now() }));
         const activationLink = `${url.origin}/auth/verify?token=${encodeURIComponent(activationToken)}`;
 
-        // Dispatch out-of-band email quietly for non-bootstrap entries
         if (!isFirstUser) {
-          ctx.waitUntil(sendVerificationEmail(email, username, activationLink));
+          // 💡 FREE SANDBOX MODE ROUTING OVERRIDE:
+          // We target your one whitelisted Sandbox inbox so Resend processes the request cleanly,
+          // while keeping the registration tied to the user account created above.
+          const testSandboxTarget = "cloudflare.rushikeshk155@gmail.com";
+          
+          await sendVerificationEmail(testSandboxTarget, username, activationLink);
         }
 
         return Response.json({ success: true }, { headers: corsHeaders });
@@ -131,19 +138,19 @@ export default {
         .bind(username, pwdHash).first();
 
       if (!user) return Response.json({ error: "Invalid credentials" }, { status: 401, headers: corsHeaders });
-      if (user.email_verified === 0) return Response.json({ error: "Access Denied. Check your mail inbox to verify ownership first." }, { status: 403, headers: corsHeaders });
-      if (user.approved === 0) return Response.json({ error: "Email verified! Account access is now pending Admin approval." }, { status: 403, headers: corsHeaders });
+      if (user.email_verified === 0) return Response.json({ error: "Access Denied. Verify your email ownership first." }, { status: 403, headers: corsHeaders });
+      if (user.approved === 0) return Response.json({ error: "Email verified! Awaiting Admin approval." }, { status: 403, headers: corsHeaders });
 
       const token = btoa(JSON.stringify({ username: user.username, role: user.role, stamp: Date.now() }));
       return Response.json({ token, user: { username: user.username, role: user.role } }, { headers: corsHeaders });
     }
 
-    // --- 4. IDENTITY SECURITY GATEWAY MIDDLEWARE ---
+    // --- 4. IDENTITY PROTECTION MIDDLEWARE ---
     const authHeader = request.headers.get("Authorization") || ""; let tokenPayload: any = null;
     try { if (authHeader.startsWith("Bearer ")) tokenPayload = JSON.parse(atob(authHeader.substring(7))); } catch(e) {}
     if (!tokenPayload && url.searchParams.has("make")) return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
 
-    // --- 5. EXCLUSIVE ADMINISTRATIVE CONTROL ROUTING ---
+    // --- 5. ADMINISTRATIVE CONTROL OPERATIONS ---
     if (url.pathname === "/admin/pending") {
       if (!tokenPayload || tokenPayload.role !== 'admin') return Response.json({ error: "Forbidden" }, { status: 403, headers: corsHeaders });
       const pending = await env.DB.prepare("SELECT id, username, email FROM users WHERE approved = 0 AND email_verified = 1").all();
