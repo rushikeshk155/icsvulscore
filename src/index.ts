@@ -10,7 +10,7 @@ import { syncAttackTechniques } from "./syncAttack";
 import { backfillAttackMappings } from "./backfillAttackMappings";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
-const RESEND_API_KEY = "re_ca1DWHcx_An5oGQJJY6VHLBNRbKBDXtpg"; // <--- PASTE YOUR API KEY HERE
+const RESEND_API_KEY = "re_CchLh8VV_J77D5Fmx2bpPgWD7i85vfUPr"; // <--- PASTE YOUR API KEY HERE
 
 async function hashPassword(pwd: string): Promise<string> {
   const msgBuffer = new TextEncoder().encode(pwd + "ICS_SALT_2026");
