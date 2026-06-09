@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ICS Risk Auditor | Unified Dashboard</title>
+    <title>ICS Risk Auditor | Security Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
@@ -14,27 +14,86 @@
 </head>
 <body class="bg-[#0b1120] text-slate-200 min-h-screen">
 
-    <div class="max-w-6xl mx-auto py-12 px-6">
+    <div id="authPortal" class="fixed inset-0 bg-[#070a13] z-50 flex items-center justify-center p-6">
+        <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl backdrop-blur-md">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl font-black text-white tracking-tight italic uppercase">ICS <span class="text-blue-500">Portal</span></h2>
+                <p id="authSubtitle" class="text-slate-500 text-[10px] font-mono uppercase mt-1 tracking-widest">Identity & Access Management</p>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-[10px] font-mono uppercase text-slate-400 mb-2">Username</label>
+                    <input type="text" id="authUsername" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-mono uppercase text-slate-400 mb-2">Password</label>
+                    <input type="password" id="authPassword" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors">
+                    <p id="passwordHint" class="hidden text-[9px] text-slate-500 mt-2 font-mono leading-relaxed">
+                        ⚠️ <span class="text-blue-400 font-bold">IEC 62443 Policy:</span> Min 10 chars, including uppercase, lowercase, numeric, and a special character (e.g., @, #, $, !).
+                    </p>
+                </div>
+                
+                <button onclick="handleAuthSubmit()" id="authPrimaryBtn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition-all mt-4">
+                    Sign In
+                </button>
+                
+                <div class="text-center mt-6">
+                    <button onclick="toggleAuthMode()" id="authToggleBtn" class="text-[10px] text-slate-500 hover:text-blue-400 font-mono uppercase tracking-widest transition-colors">
+                        Need an account? Register Here
+                    </button>
+                </div>
+                <div id="authMessage" class="text-center text-xs font-mono mt-4 hidden p-3 rounded-xl bg-slate-950/50 border border-slate-800/40"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="appDashboard" class="max-w-6xl mx-auto py-12 px-6 opacity-20 transition-opacity duration-500 pointer-events-none">
+        
+        <div id="adminPanel" class="hidden mb-12 p-6 bg-blue-950/40 border border-blue-800/50 rounded-2xl shadow-xl">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h3 class="text-sm font-black text-white uppercase tracking-wider italic">Master Authorization Center</h3>
+                    <p class="text-xs text-slate-400">Approve pending system users or elevate existing operators to Admin roles.</p>
+                </div>
+                <button onclick="loadUserManagementQueue()" class="text-[9px] font-mono uppercase tracking-widest bg-slate-800 border border-slate-700 px-3 py-1.5 rounded hover:text-blue-400 transition-colors">Refresh Queue</button>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <h4 class="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2">Pending Access Requests</h4>
+                    <div id="pendingUsersList" class="space-y-2 max-h-48 overflow-y-auto pr-2">
+                        <p class="text-xs text-slate-600 italic font-mono">No pending requests.</p>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2">Active Operational Users</h4>
+                    <div id="activeUsersList" class="space-y-2 max-h-48 overflow-y-auto pr-2">
+                        <p class="text-xs text-slate-600 italic font-mono">No active users cataloged.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <header class="flex justify-between items-center border-b border-slate-800 pb-8 mb-12">
             <div>
                 <h1 class="text-3xl font-black tracking-tight text-white italic uppercase">ICS <span class="text-blue-500 font-extrabold">Auditor</span></h1>
-                <p class="text-slate-500 text-[10px] mt-1 font-mono uppercase tracking-[0.2em]">Max CVE Tracking Engine v3.2</p>
+                <p class="text-slate-500 text-[10px] mt-1 font-mono uppercase tracking-[0.2em]">Max CVE Tracking Engine v5.2</p>
             </div>
-            <button onclick="downloadTemplate()" class="text-[10px] font-bold text-blue-400 hover:text-white uppercase tracking-widest border border-blue-400/20 hover:border-blue-500 px-5 py-2.5 rounded-lg transition-all bg-blue-500/5">
-                Download CSV Template
-            </button>
+            <div class="flex items-center gap-4">
+                <span id="userBadge" class="text-[10px] font-mono uppercase px-3 py-1.5 rounded bg-slate-800 border border-slate-700 text-slate-400">User: Guest</span>
+                <button onclick="logout()" class="text-[10px] font-mono text-red-400 hover:text-red-300 uppercase tracking-widest">Logout</button>
+            </div>
         </header>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
             <div class="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 shadow-xl">
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">1. Asset Inventory Upload</label>
-                <input type="file" id="csvFile" accept=".csv" 
-                    class="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer">
+                <input type="file" id="csvFile" accept=".csv" class="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer">
             </div>
 
             <div class="flex flex-col justify-center">
-                <button onclick="runAudit()" id="scanBtn" 
-                    class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-xl transition-all shadow-lg shadow-blue-900/20 active:scale-95 text-md uppercase tracking-wider">
+                <button onclick="runAudit()" id="scanBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-xl transition-all shadow-lg shadow-blue-900/20 active:scale-95 text-md uppercase tracking-wider">
                     Generate Risk Report
                 </button>
                 <div id="status" class="mt-4 text-center font-mono text-[10px] text-yellow-500 hidden uppercase tracking-[0.3em] animate-pulse">
@@ -48,8 +107,7 @@
                 <span class="text-green-400 font-bold text-sm uppercase italic tracking-wider">Scan Complete</span>
                 <p class="text-xs text-slate-400 mt-1">Highest severity CVE tracks have been attached to inventory assets.</p>
             </div>
-            <button onclick="downloadReport()" 
-                class="bg-green-600 hover:bg-green-500 text-white text-[10px] font-black py-3 px-8 rounded-full uppercase shadow-lg shadow-green-900/40">
+            <button onclick="downloadReport()" class="bg-green-600 hover:bg-green-500 text-white text-[10px] font-black py-3 px-8 rounded-full uppercase shadow-lg shadow-green-900/40">
                 Export Final Report (.csv)
             </button>
         </div>
@@ -79,125 +137,202 @@
     <script>
         const WORKER_URL = "https://icsvulscore.cloudflare-rushikeshk155.workers.dev";
         let resultsData = [];
+        let isLoginMode = true;
+        let currentUser = null;
+        let currentToken = "";
 
-        function downloadTemplate() {
-            const csvRows = [
-                ["Asset_ID", "Make", "Model", "Firmware", "Location"],
-                ["PLC-01", "Siemens", "S7-1200", "4.2.*", "Substation Alpha"],
-                ["HMI-01", "Siemens", "TP700", "17", "Control Room"],
-                ["PLC-02", "Rockwell", "ControlLogix_5570", "20.011", "Water Treatment"]
-            ];
-            const csvContent = csvRows.map(e => e.join(",")).join("\n");
-            const blob = new Blob([csvContent], { type: 'text/csv' });
-            const link = document.createElement('a');
-            link.href = window.URL.createObjectURL(blob);
-            link.download = 'ICS_Asset_Template_v3.csv';
-            link.click();
+        function showMessage(msg, isError = false) {
+            const el = document.getElementById('authMessage');
+            el.innerText = msg;
+            el.className = `text-center text-xs font-mono mt-4 block ${isError ? 'text-red-400' : 'text-green-400'}`;
         }
+
+        function toggleAuthMode() {
+            isLoginMode = !isLoginMode;
+            document.getElementById('authPrimaryBtn').innerText = isLoginMode ? 'Sign In' : 'Register Account';
+            document.getElementById('authToggleBtn').innerText = isLoginMode ? 'Need an account? Register Here' : 'Back to Login';
+            document.getElementById('authSubtitle').innerText = isLoginMode ? 'Identity & Access Management' : 'Create New System Account';
+            
+            // Show/Hide password warning message block based on registration context
+            const hint = document.getElementById('passwordHint');
+            if (isLoginMode) hint.classList.add('hidden'); else hint.classList.remove('hidden');
+        }
+
+        // IEC 62443 Password Complexity Regex Check Helper
+        function validateIEC62443Password(pwd) {
+            // Min 10 chars, at least 1 uppercase, 1 lowercase, 1 digit, 1 special character
+            const iecRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/;
+            return iecRegex.test(pwd);
+        }
+
+        async function handleAuthSubmit() {
+            const u = document.getElementById('authUsername').value.trim();
+            const p = document.getElementById('authPassword').value.trim();
+            if(!u || !p) return showMessage("Provide credentials", true);
+
+            // Enforce registration gate compliance dynamically via frontend
+            if (!isLoginMode && !validateIEC62443Password(p)) {
+                return showMessage("Password violates IEC 62443 policy requirements.", true);
+            }
+
+            const endpoint = isLoginMode ? '/auth/login' : '/auth/register';
+            
+            try {
+                const res = await fetch(`${WORKER_URL}${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: u, password: p })
+                });
+                const data = await res.json();
+                
+                if(!res.ok) throw new Error(data.error || "Authentication failed");
+
+                if (!isLoginMode) {
+                    showMessage("Registration submitted! Awaiting administrator approval.");
+                    toggleAuthMode();
+                } else {
+                    currentUser = data.user;
+                    currentToken = data.token;
+                    
+                    document.getElementById('authPortal').classList.add('hidden');
+                    const dashboard = document.getElementById('appDashboard');
+                    dashboard.classList.remove('opacity-20', 'pointer-events-none');
+                    
+                    document.getElementById('userBadge').innerText = `User: ${currentUser.username} (${currentUser.role})`;
+
+                    if(currentUser.role === 'admin') {
+                        document.getElementById('adminPanel').classList.remove('hidden');
+                        loadUserManagementQueue();
+                    }
+                }
+            } catch (err) {
+                showMessage(err.message, true);
+            }
+        }
+
+        async function loadUserManagementQueue() {
+            try {
+                const resPending = await fetch(`${WORKER_URL}/admin/pending`, {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                const pending = await resPending.json();
+                const pContainer = document.getElementById('pendingUsersList');
+                pContainer.innerHTML = "";
+                
+                if(pending.length === 0) {
+                    pContainer.innerHTML = `<p class="text-xs text-slate-600 italic font-mono">No pending requests.</p>`;
+                } else {
+                    pending.forEach(u => {
+                        pContainer.innerHTML += `
+                            <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                                <span class="text-xs font-mono text-slate-300">${u.username}</span>
+                                <button onclick="approveUser(${u.id})" class="text-[9px] font-bold bg-green-600/20 text-green-400 hover:bg-green-600 hover:text-white border border-green-500/20 px-3 py-1 rounded">Approve</button>
+                            </div>
+                        `;
+                    });
+                }
+
+                const resActive = await fetch(`${WORKER_URL}/admin/active-users`, {
+                    headers: { 'Authorization': `Bearer ${currentToken}` }
+                });
+                const active = await resActive.json();
+                const aContainer = document.getElementById('activeUsersList');
+                aContainer.innerHTML = "";
+
+                active.forEach(u => {
+                    const isAdmin = u.role === 'admin';
+                    aContainer.innerHTML += `
+                        <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                            <div>
+                                <span class="text-xs font-mono text-slate-300">${u.username}</span>
+                                <span class="text-[8px] font-mono text-slate-500 uppercase ml-2">[${u.role}]</span>
+                            </div>
+                            ${!isAdmin ? `
+                                <button onclick="promoteUser(${u.id})" class="text-[9px] font-bold bg-blue-600/20 text-blue-400 hover:bg-blue-600 hover:text-white border border-blue-500/20 px-3 py-1 rounded">Make Admin</button>
+                            ` : `<span class="text-[8px] font-bold text-blue-500 uppercase font-mono mr-2">Authorized Manager</span>`}
+                        </div>
+                    `;
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        async function approveUser(userId) {
+            try {
+                const res = await fetch(`${WORKER_URL}/admin/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` },
+                    body: JSON.stringify({ id: userId })
+                });
+                if(res.ok) loadUserManagementQueue();
+            } catch(e) { console.error(e); }
+        }
+
+        async function promoteUser(userId) {
+            try {
+                const res = await fetch(`${WORKER_URL}/admin/promote`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` },
+                    body: JSON.stringify({ id: userId })
+                });
+                if(res.ok) loadUserManagementQueue();
+            } catch(e) { console.error(e); }
+        }
+
+        function logout() { window.location.reload(); }
 
         async function runAudit() {
             const fileInput = document.getElementById('csvFile');
             if (!fileInput.files[0]) return alert("Please upload your inventory CSV.");
-
             const table = document.getElementById('auditTable');
             const status = document.getElementById('status');
             const reportArea = document.getElementById('reportArea');
-
-            table.innerHTML = "";
-            resultsData = [];
-            status.classList.remove('hidden');
-            reportArea.classList.add('hidden');
+            table.innerHTML = ""; resultsData = [];
+            status.classList.remove('hidden'); reportArea.classList.add('hidden');
 
             Papa.parse(fileInput.files[0], {
-                header: true,
-                skipEmptyLines: true,
+                header: true, skipEmptyLines: true,
                 complete: async function(results) {
                     const assets = results.data;
-                    
                     for (let i = 0; i < assets.length; i++) {
                         const asset = assets[i];
                         status.innerText = `ANALYZING: ${asset.Make} ${asset.Model} (${i+1}/${assets.length})`;
-                        
                         const fw = asset.Firmware || asset.firmware || "";
-                        
                         try {
-                            const res = await fetch(`${WORKER_URL}/?make=${encodeURIComponent(asset.Make)}&model=${encodeURIComponent(asset.Model)}&firmware=${encodeURIComponent(fw)}`);
+                            const res = await fetch(`${WORKER_URL}/?make=${encodeURIComponent(asset.Make)}&model=${encodeURIComponent(asset.Model)}&firmware=${encodeURIComponent(fw)}`, {
+                                headers: { 'Authorization': `Bearer ${currentToken}` }
+                            });
                             const data = await res.json();
-                            
-                            // Item 0 is guaranteed to hold the absolute max severity threat from D1 sorting rules
                             const top = data.vulnerabilities[0] || {};
-                            
                             const entry = {
-                                Asset_ID: asset.Asset_ID || 'N/A',
-                                Make: asset.Make,
-                                Model: asset.Model,
-                                Firmware: fw,
-                                Location: asset.Location || 'Unknown',
-                                Max_CVE_ID: top.cve_id || 'NONE',
-                                Risk_Score: top.ics_weighted_score || 0,
-                                Tactic: top.tactic || 'NONE',
-                                Technique: top.technique_name || 'NONE',
-                                Mitigation: top.mitigation || 'N/A',
-                                Description: top.description || 'No vulnerabilities found.'
+                                Asset_ID: asset.Asset_ID || 'N/A', Make: asset.Make, Model: asset.Model, Firmware: fw,
+                                Location: asset.Location || 'Unknown', Max_CVE_ID: top.cve_id || 'NONE',
+                                Risk_Score: top.ics_weighted_score || 0, Tactic: top.tactic || 'NONE'
                             };
-                            
-                            resultsData.push(entry);
-                            renderRow(entry);
-                        } catch (err) {
-                            console.error(err);
-                        }
+                            resultsData.push(entry); renderRow(entry);
+                        } catch (err) { console.error(err); }
                     }
-                    status.classList.add('hidden');
-                    reportArea.classList.remove('hidden');
+                    status.classList.add('hidden'); reportArea.classList.remove('hidden');
                 }
             });
         }
 
         function renderRow(r) {
             const table = document.getElementById('auditTable');
-            let scoreColor = "text-slate-500";
-            let cveColor = "text-slate-400";
-            
-            if (r.Risk_Score >= 9) {
-                scoreColor = "text-red-500 font-black drop-shadow-[0_0_8px_rgba(239,68,68,0.3)]";
-                cveColor = "text-red-400 font-semibold";
-            } else if (r.Risk_Score >= 7) {
-                scoreColor = "text-orange-500 font-bold";
-                cveColor = "text-orange-400";
-            }
-
+            let scoreColor = "text-slate-500"; let cveColor = "text-slate-400";
+            if (r.Risk_Score >= 9) { scoreColor = "text-red-500 font-black"; cveColor = "text-red-400 font-semibold"; }
+            else if (r.Risk_Score >= 7) { scoreColor = "text-orange-500 font-bold"; cveColor = "text-orange-400"; }
             table.innerHTML += `
                 <tr class="border-t border-slate-800/50 hover:bg-blue-500/5 transition-all group">
                     <td class="p-5">
                         <span class="block text-white font-bold text-xs uppercase tracking-tight">${r.Asset_ID}</span>
                         <span class="text-[9px] text-slate-500 font-mono uppercase">${r.Make} ${r.Model}</span>
                     </td>
-                    <td class="p-5 text-center font-mono text-[10px] text-blue-400">
-                        ${r.Firmware || 'ANY'}
-                    </td>
-                    <td class="p-5 text-center font-mono text-xs ${cveColor}">
-                        ${r.Max_CVE_ID}
-                    </td>
-                    <td class="p-5 text-center border-x border-slate-800/50 ${scoreColor} text-xl mono tracking-tighter">
-                        ${r.Risk_Score > 0 ? r.Risk_Score : '--'}
-                    </td>
-                    <td class="p-5 text-right">
-                        <span class="text-[9px] bg-slate-800 px-2 py-1 rounded border border-slate-700 text-slate-500 uppercase font-black tracking-widest group-hover:text-slate-300 transition-colors">
-                            ${r.Tactic}
-                        </span>
-                    </td>
+                    <td class="p-5 text-center font-mono text-[10px] text-blue-400">${r.Firmware || 'ANY'}</td>
+                    <td class="p-5 text-center font-mono text-xs ${cveColor}">${r.Max_CVE_ID}</td>
+                    <td class="p-5 text-center border-x border-slate-800/50 ${scoreColor} text-xl mono">${r.Risk_Score > 0 ? r.Risk_Score : '--'}</td>
+                    <td class="p-5 text-right"><span class="text-[9px] bg-slate-800 px-2 py-1 rounded border border-slate-700 text-slate-500 uppercase font-black tracking-widest">${r.Tactic}</span></td>
                 </tr>
             `;
-        }
-
-        function downloadReport() {
-            const csv = Papa.unparse(resultsData);
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `ICS_Max_CVE_Audit_${new Date().toISOString().split('T')[0]}.csv`;
-            a.click();
         }
     </script>
 </body>
