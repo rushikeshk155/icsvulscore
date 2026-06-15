@@ -3,7 +3,7 @@
  * Compliant with modern NIST / OWASP guidelines for 2026 Web Infrastructure
  */
 
-const ITERATIONS = 600000; // Modern computational threshold targeting ~150-250ms isolation runtime
+const ITERATIONS = 100000; // Modern computational threshold targeting ~150-250ms isolation runtime
 
 /**
  * Encodes a password into a self-describing modular cryptographic hash format string.
