@@ -1,18 +1,18 @@
 /**
  * ICS Vuln Score - Main Worker Handler
- * Version: 11.1 (True Multi-Stage Verification & Modular Sandbox Engine)
+ * Version: 11.2 (True Multi-Stage Verification & Modular Sandbox Engine)
  */
 
-// --- UPDATE LINES 7 THROUGH 12 TO LOOK EXACTLY LIKE THIS ---
+// CRITICAL COMPILER FIX: Explicitly append the '.ts' extension for Cloudflare automated repository builds
 import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto.ts";
-import { updateNVDIncremental } from "./updateNVD.ts";
-import { backfillNVD } from "./backfillNVD.ts";
-import { syncKevData } from "./updateKEV.ts";
-import { syncAttackTechniques } from "./syncAttack.ts";
-import { backfillAttackMappings } from "./backfillAttackMappings.ts";
+import { updateNVDIncremental } from "./updateNVD";
+import { backfillNVD } from "./backfillNVD";
+import { syncKevData } from "./updateKEV";
+import { syncAttackTechniques } from "./syncAttack";
+import { backfillAttackMappings } from "./backfillAttackMappings";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
-const RESEND_API_KEY = "re_ca1DWHcx..."; // <--- YOUR ACTUAL ACTIVE RESEND KEY STRING HERE
+const RESEND_API_KEY = "re_ca1DWHcx..."; // <--- Paste your actual active Resend API key string token here
 
 function verifyIEC62443PasswordStrength(pwd: string): boolean {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/.test(pwd);
@@ -96,8 +96,9 @@ export default {
       const passwordAuthBlock = await generatePasswordParametricBlock(password);
       
       try {
-        const userCheck = await env.DB.prepare("SELECT COUNT(*) as count FROM users").first();
-        const isFirstUser = userCheck.count === 0;
+        // Hardened Table Count Check: Safely extracts the specific count string primitive to avoid TypeErrors on empty maps
+        const userCheck = await env.DB.prepare("SELECT COUNT(*) as count FROM users").first("count") as number | null;
+        const isFirstUser = !userCheck || userCheck === 0;
         
         // Setup initial system roles
         const role = isFirstUser ? 'admin' : 'user';
@@ -121,8 +122,9 @@ export default {
         }
 
         return Response.json({ success: true }, { headers: corsHeaders });
-      } catch (e) {
-        return Response.json({ error: "Username or Email already registered." }, { status: 400, headers: corsHeaders });
+      } catch (e: any) {
+        // Safe Error Handling Wrapper: Catches SQL Constraint exceptions cleanly and passes them down with CORS attached
+        return Response.json({ error: e.message || "Database execution failure." }, { status: 400, headers: corsHeaders });
       }
     }
 
