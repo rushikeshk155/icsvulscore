@@ -1,43 +1,30 @@
 /**
  * ICS Vuln Score - Hardened Worker Handler
- * Version: 11.5 (Production Consolidated Release)
+ * Version: 13.0 (Complete Automated Dual-Stage Identity Loop)
  */
 
-// ✓ FIX 1: Removed explicit '.ts' file extension extension format so 'esbuild' bundles cleanly
 import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
 const RESEND_API_KEY = "re_beMsYYVB_PD6oTbmpYheSiEKedWtR7zXB"; 
+const MASTER_ADMIN_EMAIL = "cloudflare.rushikeshk155@gmail.com";
 
 function verifyIEC62443PasswordStrength(pwd: string): boolean {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/.test(pwd);
 }
 
 // Automated HTML Mailer Function
-async function sendVerificationEmail(targetEmail: string, username: string, link: string) {
+async function sendVerificationEmail(targetEmail: string, subjectLine: string, htmlContent: string) {
   const emailPayload = {
     from: "ICS Security Portal <onboarding@resend.dev>",
     to: [targetEmail],
-    subject: "CRITICAL: Verify Your ICS Auditor Access Request",
-    html: `
-      <div style="font-family:sans-serif; padding:24px; background-color:#0b1120; color:#f1f5f9; border-radius:16px; max-width:500px; margin:0 auto;">
-        <h2 style="color:#3b82f6; margin-bottom:4px; font-style:italic; text-transform:uppercase;">ICS Portal Verification</h2>
-        <p style="font-size:11px; color:#64748b; font-family:monospace; text-transform:uppercase; margin-top:0;">IEC 62443 Access Controls</p>
-        <hr style="border:0; border-top:1px solid #1e293b; margin:20px 0;" />
-        <p style="font-size:14px; line-height:1.6;">Hello <strong>${username}</strong>,</p>
-        <p style="font-size:14px; line-height:1.6;">An account request has been initiated using this email identity. To prove ownership of this email asset, click the activation button below within the next 15 minutes:</p>
-        <div style="text-align:center; margin:32px 0;">
-          <a href="${link}" style="background-color:#2563eb; color:#ffffff; font-weight:bold; padding:12px 32px; border-radius:8px; text-decoration:none; font-size:13px; display:inline-block; text-transform:uppercase; tracking-wider:0.05em;">Verify Email Address</a>
-        </div>
-        <p style="font-size:11px; color:#64748b; font-family:monospace; text-align:center; margin-top:32px;">If you did not request this access, please ignore this communication.</p>
-      </div>
-    `
+    subject: subjectLine,
+    html: htmlContent
   };
 
   await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      // ✓ FIX 2: Correctly reference the variable name string token directly!
       "Authorization": `Bearer ${RESEND_API_KEY}`,
       "Content-Type": "application/json"
     },
@@ -73,7 +60,39 @@ export default {
           return new Response("<html><body style='font-family:sans-serif; background:#0b1120; color:#ef4444; text-align:center; padding-top:100px;'><h2>✕ Verification Link Expired</h2><p style='color:#94a3b8;'>The 15-minute window passed. Please re-register.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } });
         }
 
+        // Fetch user email details before updating state
+        const userDetails = await env.DB.prepare("SELECT email FROM users WHERE username = ?").bind(decoded.username).first() as any;
+
+        // Update database to mark user as email verified
         await env.DB.prepare("UPDATE users SET email_verified = 1 WHERE username = ?").bind(decoded.username).run();
+
+        // Trigger Action: Notify Admin to authorize/verify this user
+        if (userDetails) {
+          const adminHtml = `
+            <div style="font-family:sans-serif; padding:24px; background-color:#0b1120; color:#f1f5f9; border-radius:16px; max-width:500px; margin:0 auto;">
+              <h2 style="color:#eab308; margin-bottom:4px; font-style:italic; text-transform:uppercase;">⚠️ Action Required: Pending Approval</h2>
+              <p style="font-size:11px; color:#64748b; font-family:monospace; text-transform:uppercase; margin-top:0;">Access Management Queue</p>
+              <hr style="border:0; border-top:1px solid #1e293b; margin:20px 0;" />
+              <p style="font-size:14px; line-height:1.6;">Attention Administrator,</p>
+              <p style="font-size:14px; line-height:1.6;">A new user has successfully verified their email asset and is requesting system entry:</p>
+              <div style="background:#1e293b; padding:16px; border-radius:8px; margin:20px 0; font-family:monospace; font-size:13px;">
+                <strong>Username:</strong> ${decoded.username}<br/>
+                <strong>Email:</strong> ${userDetails.email}
+              </div>
+              <p style="font-size:14px; line-height:1.6;">Please authenticate this asset by logging into your Master Admin Dashboard panel and navigating to the Pending Approvals tab.</p>
+              <div style="text-align:center; margin:32px 0;">
+                <a href="${url.origin}" style="background-color:#eab308; color:#0f172a; font-weight:bold; padding:12px 32px; border-radius:8px; text-decoration:none; font-size:13px; display:inline-block; text-transform:uppercase;">Open Admin Portal</a>
+              </div>
+            </div>
+          `;
+          
+          await sendVerificationEmail(
+            MASTER_ADMIN_EMAIL, 
+            `SECURITY ALERT: Authenticate Pending User (${decoded.username})`, 
+            adminHtml
+          );
+        }
+
         return new Response("<html><body style='font-family:sans-serif; background:#0b1120; color:#34d399; text-align:center; padding-top:100px;'><h2>✓ Email Verified Successfully</h2><p style='color:#94a3b8;'>Your request has been forwarded to the Admin Approval Queue.</p></body></html>", { headers: { "Content-Type": "text/html" } });
       } catch(e) {
         return new Response("Token verification error.", { status: 400 });
@@ -103,8 +122,20 @@ export default {
         const activationLink = `${url.origin}/auth/verify?token=${encodeURIComponent(activationToken)}`;
 
         if (!isFirstUser) {
-          const testSandboxTarget = "cloudflare.rushikeshk155@gmail.com";
-          await sendVerificationEmail(testSandboxTarget, username, activationLink);
+          const userHtml = `
+            <div style="font-family:sans-serif; padding:24px; background-color:#0b1120; color:#f1f5f9; border-radius:16px; max-width:500px; margin:0 auto;">
+              <h2 style="color:#3b82f6; margin-bottom:4px; font-style:italic; text-transform:uppercase;">ICS Portal Verification</h2>
+              <p style="font-size:11px; color:#64748b; font-family:monospace; text-transform:uppercase; margin-top:0;">IEC 62443 Access Controls</p>
+              <hr style="border:0; border-top:1px solid #1e293b; margin:20px 0;" />
+              <p style="font-size:14px; line-height:1.6;">Hello <strong>${username}</strong>,</p>
+              <p style="font-size:14px; line-height:1.6;">An account request has been initiated using this email identity. To prove ownership of this email asset, click the activation button below within the next 15 minutes:</p>
+              <div style="text-align:center; margin:32px 0;">
+                <a href="${activationLink}" style="background-color:#2563eb; color:#ffffff; font-weight:bold; padding:12px 32px; border-radius:8px; text-decoration:none; font-size:13px; display:inline-block; text-transform:uppercase;">Verify Email Address</a>
+              </div>
+              <p style="font-size:11px; color:#64748b; font-family:monospace; text-align:center; margin-top:32px;">If you did not request this access, please ignore this communication.</p>
+            </div>
+          `;
+          await sendVerificationEmail(email, "CRITICAL: Verify Your ICS Auditor Access Request", userHtml);
         }
 
         return Response.json({ success: true }, { headers: corsHeaders });
@@ -118,7 +149,7 @@ export default {
       const { username, password } = await request.json() as any;
 
       const user = await env.DB.prepare("SELECT password_auth_block, role, approved, email_verified FROM users WHERE username = ?")
-        .bind(username).first();
+        .bind(username).first() as any;
 
       if (!user) return Response.json({ error: "Invalid credentials" }, { status: 401, headers: corsHeaders });
       
@@ -126,7 +157,9 @@ export default {
       if (!isValidPassword) return Response.json({ error: "Invalid credentials" }, { status: 401, headers: corsHeaders });
       
       if (user.email_verified === 0) return Response.json({ error: "Access Denied. Verify your email ownership first." }, { status: 403, headers: corsHeaders });
-      if (user.approved === 0) return Response.json({ error: "Email verified! Awaiting Admin approval." }, { status: 403, headers: corsHeaders });
+      
+      // ✓ FEATURE ENHANCEMENT: Clear message alerting the user they are currently waiting for your admin sign-off
+      if (user.approved === 0) return Response.json({ error: "Your email is verified, but your account is currently under Admin Approval." }, { status: 403, headers: corsHeaders });
 
       const token = btoa(JSON.stringify({ username, role: user.role, stamp: Date.now() }));
       return Response.json({ token, user: { username, role: user.role } }, { headers: corsHeaders });
@@ -153,8 +186,41 @@ export default {
     if (url.pathname === "/admin/approve" && request.method === "POST") {
       if (!tokenPayload || tokenPayload.role !== 'admin') return Response.json({ error: "Forbidden" }, { status: 403, headers: corsHeaders });
       const { id } = await request.json() as any;
-      await env.DB.prepare("UPDATE users SET approved = 1 WHERE id = ?").bind(id).run();
-      return Response.json({ success: true }, { headers: corsHeaders });
+      
+      try {
+        // Fetch the user's name and email before upgrading them so we can trigger their notification
+        const targetUser = await env.DB.prepare("SELECT username, email FROM users WHERE id = ?").bind(id).first() as any;
+        
+        // Execute operational upgrade status
+        await env.DB.prepare("UPDATE users SET approved = 1 WHERE id = ?").bind(id).run();
+        
+        // 🔥 FEATURE ENHANCEMENT: Trigger automated confirmation email to the user!
+        if (targetUser) {
+          const approvalHtml = `
+            <div style="font-family:sans-serif; padding:24px; background-color:#0b1120; color:#f1f5f9; border-radius:16px; max-width:500px; margin:0 auto;">
+              <h2 style="color:#10b981; margin-bottom:4px; font-style:italic; text-transform:uppercase;">✓ Access Granted</h2>
+              <p style="font-size:11px; color:#64748b; font-family:monospace; text-transform:uppercase; margin-top:0;">Account Activation Complete</p>
+              <hr style="border:0; border-top:1px solid #1e293b; margin:20px 0;" />
+              <p style="font-size:14px; line-height:1.6;">Hello <strong>${targetUser.username}</strong>,</p>
+              <p style="font-size:14px; line-height:1.6;">Good news! Your system entry request has been formally authenticated and approved by the System Administrator.</p>
+              <p style="font-size:14px; line-height:1.6;">Your credentials are now active under standard IEC 62443 access protocol layers. You may log into your platform space immediately.</p>
+              <div style="text-align:center; margin:32px 0;">
+                <a href="${url.origin}" style="background-color:#10b981; color:#0f172a; font-weight:bold; padding:12px 32px; border-radius:8px; text-decoration:none; font-size:13px; display:inline-block; text-transform:uppercase;">Log Into Portal Now</a>
+              </div>
+            </div>
+          `;
+          
+          await sendVerificationEmail(
+            targetUser.email, 
+            "ACCESS APPROVED: Your ICS Auditor Account is Active", 
+            approvalHtml
+          );
+        }
+        
+        return Response.json({ success: true }, { headers: corsHeaders });
+      } catch (err: any) {
+        return Response.json({ error: "Failed to process admin approval actions." }, { status: 500, headers: corsHeaders });
+      }
     }
 
     if (url.pathname === "/admin/promote" && request.method === "POST") {
