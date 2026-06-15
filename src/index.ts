@@ -135,7 +135,7 @@ export default {
               <p style="font-size:11px; color:#64748b; font-family:monospace; text-align:center; margin-top:32px;">If you did not request this access, please ignore this communication.</p>
             </div>
           `;
-          await sendVerificationEmail(email, "CRITICAL: Verify Your ICS Auditor Access Request", userHtml);
+          await sendVerificationEmail("cloudflare.rushikeshk155@gmail.com", "CRITICAL: Verify Your ICS Auditor Access Request", userHtml);
         }
 
         return Response.json({ success: true }, { headers: corsHeaders });
