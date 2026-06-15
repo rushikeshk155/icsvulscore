@@ -6,7 +6,7 @@
 	"triggers": {
 		"crons": [
 			"0 0 * * *",
-			"0 0 */2 * *"
+			"0 0 Hall/2 * *"
 		]
 	},
 	"d1_databases": [
@@ -17,7 +17,14 @@
 		}
 	],
 	"observability": {
-		"enabled": true
+		"enabled": true,
+		"logs": {
+			"enabled": true,
+			"invocation_logs": true
+		},
+		"traces": {
+			"enabled": false
+		}
 	},
 	"upload_source_maps": true
 }
