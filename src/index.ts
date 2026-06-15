@@ -1,18 +1,12 @@
 /**
- * ICS Vuln Score - Main Worker Handler
- * Version: 11.2 (True Multi-Stage Verification & Modular Sandbox Engine)
+ * ICS Vuln Score - Hardened Worker Handler
+ * Version: 11.3 (Self-Contained Auth Verification Loop)
  */
 
-// CRITICAL COMPILER FIX: Explicitly append the '.ts' extension for Cloudflare automated repository builds
 import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto.ts";
-import { updateNVDIncremental } from "./updateNVD";
-import { backfillNVD } from "./backfillNVD";
-import { syncKevData } from "./updateKEV";
-import { syncAttackTechniques } from "./syncAttack";
-import { backfillAttackMappings } from "./backfillAttackMappings";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
-const RESEND_API_KEY = "re_ca1DWHcx..."; // <--- Paste your actual active Resend API key string token here
+const RESEND_API_KEY = "re_ca1DWHcx..."; // <--- Double-check that your active Resend key is here!
 
 function verifyIEC62443PasswordStrength(pwd: string): boolean {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/.test(pwd);
@@ -71,14 +65,12 @@ export default {
         const decoded = JSON.parse(atob(token));
         if(decoded.secret !== SECRET_CRYPTO_KEY) throw new Error("Signature verification failed.");
 
-        // Enforce strict 15-Minute Expiration Gate
         const fifteenMinutesInMs = 15 * 60 * 1000;
         if (Date.now() - decoded.stamp > fifteenMinutesInMs) {
           await env.DB.prepare("DELETE FROM users WHERE username = ? AND email_verified = 0").bind(decoded.username).run();
           return new Response("<html><body style='font-family:sans-serif; background:#0b1120; color:#ef4444; text-align:center; padding-top:100px;'><h2>✕ Verification Link Expired</h2><p style='color:#94a3b8;'>The 15-minute window passed. Please re-register.</p></body></html>", { status: 400, headers: { "Content-Type": "text/html" } });
         }
 
-        // Advance account status to Verified (Awaiting Admin Approval step)
         await env.DB.prepare("UPDATE users SET email_verified = 1 WHERE username = ?").bind(decoded.username).run();
         return new Response("<html><body style='font-family:sans-serif; background:#0b1120; color:#34d399; text-align:center; padding-top:100px;'><h2>✓ Email Verified Successfully</h2><p style='color:#94a3b8;'>Your request has been forwarded to the Admin Approval Queue.</p></body></html>", { headers: { "Content-Type": "text/html" } });
       } catch(e) {
@@ -92,20 +84,16 @@ export default {
       if (!username || !password || !email) return Response.json({ error: "Missing fields" }, { status: 400, headers: corsHeaders });
       if (!verifyIEC62443PasswordStrength(password)) return Response.json({ error: "Weak password implementation." }, { status: 400, headers: corsHeaders });
       
-      // Call modern high-iteration PBKDF2 hasher module
       const passwordAuthBlock = await generatePasswordParametricBlock(password);
       
       try {
-        // Hardened Table Count Check: Safely extracts the specific count string primitive to avoid TypeErrors on empty maps
         const userCheck = await env.DB.prepare("SELECT COUNT(*) as count FROM users").first("count") as number | null;
         const isFirstUser = !userCheck || userCheck === 0;
         
-        // Setup initial system roles
         const role = isFirstUser ? 'admin' : 'user';
         const approved = isFirstUser ? 1 : 0;
         const emailVerified = isFirstUser ? 1 : 0;
 
-        // Save real registration data into the D1 schema instance
         await env.DB.prepare("INSERT INTO users (username, password_auth_block, email, role, approved, email_verified) VALUES (?, ?, ?, ?, ?, ?)")
           .bind(username, passwordAuthBlock, email, role, approved, emailVerified).run();
           
@@ -113,17 +101,12 @@ export default {
         const activationLink = `${url.origin}/auth/verify?token=${encodeURIComponent(activationToken)}`;
 
         if (!isFirstUser) {
-          // 💡 FREE SANDBOX MODE OVERRIDE RULE:
-          // Routes out-of-band messages to your primary authorized account email string,
-          // bypassing the Resend dev 403 blocks while testing with secondary usernames.
           const testSandboxTarget = "cloudflare.rushikeshk155@gmail.com";
-          
           await sendVerificationEmail(testSandboxTarget, username, activationLink);
         }
 
         return Response.json({ success: true }, { headers: corsHeaders });
       } catch (e: any) {
-        // Safe Error Handling Wrapper: Catches SQL Constraint exceptions cleanly and passes them down with CORS attached
         return Response.json({ error: e.message || "Database execution failure." }, { status: 400, headers: corsHeaders });
       }
     }
@@ -137,7 +120,6 @@ export default {
 
       if (!user) return Response.json({ error: "Invalid credentials" }, { status: 401, headers: corsHeaders });
       
-      // Perform inline parametric validation pass
       const isValidPassword = await verifyPasswordAgainstBlock(password, user.password_auth_block);
       if (!isValidPassword) return Response.json({ error: "Invalid credentials" }, { status: 401, headers: corsHeaders });
       
@@ -196,13 +178,6 @@ export default {
       try { return Response.json({ vulnerabilities: (await env.DB.prepare(query).bind(...params).all()).results }, { headers: corsHeaders }); } 
       catch (err: any) { return Response.json({ error: "Database failure" }, { status: 500, headers: corsHeaders }); }
     }
-
-    // --- 7. BACKGROUND SYNC CONTROLS ---
-    if (url.pathname === "/sync-incremental") { await updateNVDIncremental(env); return new Response("Done."); }
-    if (url.pathname === "/backfill-execute") { await backfillNVD(env); return new Response("Running."); }
-    if (url.pathname === "/sync-kev") { await syncKevData(env); return new Response("Updated KEV."); }
-    if (url.pathname === "/sync-attack-library") { await syncAttackTechniques(env); return new Response("Updated MITRE."); }
-    if (url.pathname === "/backfill-attack") { await backfillAttackMappings(env); return new Response("Mapped."); }
 
     return new Response("ICS API Secure Gate.", { headers: { "Content-Type": "text/plain" } });
   }
