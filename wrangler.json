@@ -6,7 +6,7 @@
 	"triggers": {
 		"crons": [
 			"0 0 * * *",
-			"0 0 Hall/2 * *"
+			"0 0 */2 * *"
 		]
 	},
 	"d1_databases": [
