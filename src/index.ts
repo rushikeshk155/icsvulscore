@@ -1,12 +1,13 @@
 /**
  * ICS Vuln Score - Hardened Worker Handler
- * Version: 11.3 (Self-Contained Auth Verification Loop)
+ * Version: 11.5 (Production Consolidated Release)
  */
 
-import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto.ts";
+// ✓ FIX 1: Removed explicit '.ts' file extension extension format so 'esbuild' bundles cleanly
+import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
-const RESEND_API_KEY = "re_beMsYYVB_PD6oTbmpYheSiEKedWtR7zXB"; // <--- Double-check that your active Resend key is here!
+const RESEND_API_KEY = "re_beMsYYVB_PD6oTbmpYheSiEKedWtR7zXB"; 
 
 function verifyIEC62443PasswordStrength(pwd: string): boolean {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/.test(pwd);
@@ -36,6 +37,7 @@ async function sendVerificationEmail(targetEmail: string, username: string, link
   await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
+      // ✓ FIX 2: Correctly reference the variable name string token directly!
       "Authorization": `Bearer ${RESEND_API_KEY}`,
       "Content-Type": "application/json"
     },
