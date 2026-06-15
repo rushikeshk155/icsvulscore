@@ -3,13 +3,13 @@
  * Version: 11.1 (True Multi-Stage Verification & Modular Sandbox Engine)
  */
 
-// CRITICAL COMPILER FIX: Explicitly append the '.ts' extension for Cloudflare automated repository builds
+// --- UPDATE LINES 7 THROUGH 12 TO LOOK EXACTLY LIKE THIS ---
 import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto.ts";
-import { updateNVDIncremental } from "./updateNVD";
-import { backfillNVD } from "./backfillNVD";
-import { syncKevData } from "./updateKEV";
-import { syncAttackTechniques } from "./syncAttack";
-import { backfillAttackMappings } from "./backfillAttackMappings";
+import { updateNVDIncremental } from "./updateNVD.ts";
+import { backfillNVD } from "./backfillNVD.ts";
+import { syncKevData } from "./updateKEV.ts";
+import { syncAttackTechniques } from "./syncAttack.ts";
+import { backfillAttackMappings } from "./backfillAttackMappings.ts";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
 const RESEND_API_KEY = "re_ca1DWHcx..."; // <--- YOUR ACTUAL ACTIVE RESEND KEY STRING HERE
