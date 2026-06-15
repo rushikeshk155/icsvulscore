@@ -36,7 +36,7 @@ async function sendVerificationEmail(targetEmail: string, username: string, link
   await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${RESEND_API_KEY}`,
+      "Authorization": `Bearer ${re_beMsYYVB_PD6oTbmpYheSiEKedWtR7zXB}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(emailPayload)
