@@ -6,7 +6,7 @@
 import { generatePasswordParametricBlock, verifyPasswordAgainstBlock } from "./crypto.ts";
 
 const SECRET_CRYPTO_KEY = "IEC_62443_SIGNING_BLOCK";
-const RESEND_API_KEY = "re_ca1DWHcx..."; // <--- Double-check that your active Resend key is here!
+const RESEND_API_KEY = "re_beMsYYVB_PD6oTbmpYheSiEKedWtR7zXB"; // <--- Double-check that your active Resend key is here!
 
 function verifyIEC62443PasswordStrength(pwd: string): boolean {
   return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/.test(pwd);
@@ -36,7 +36,7 @@ async function sendVerificationEmail(targetEmail: string, username: string, link
   await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${re_beMsYYVB_PD6oTbmpYheSiEKedWtR7zXB}`,
+      "Authorization": `Bearer ${RESEND_API_KEY}`,
       "Content-Type": "application/json"
     },
     body: JSON.stringify(emailPayload)
