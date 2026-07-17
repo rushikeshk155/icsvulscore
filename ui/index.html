@@ -1,282 +1,38 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ICS Risk Auditor | Security Portal</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght=400;600;800&family=JetBrains+Mono&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-        .mono { font-family: 'JetBrains Mono', monospace; }
-    </style>
-</head>
-<body class="bg-[#0b1120] text-slate-200 min-h-screen">
+<!-- This wrapper holds your formatted report structure -->
+<div id="executive-report-template" style="padding: 40px; font-family: Arial, sans-serif; background-color: #fff; color: #000;">
+  
+  <!-- Header Banner -->
+  <div style="background-color: #0b1120; padding: 20px; color: white; margin-bottom: 30px;">
+    <h2>INDUSTRIAL VULNERABILITY AUDIT REPORT</h2>
+    <p>Compliance Framework: IEC 62443</p>
+  </div>
 
-    <div id="authPortal" class="fixed inset-0 bg-[#070a13] z-50 flex items-center justify-center p-6">
-        <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl backdrop-blur-md">
-            <div class="text-center mb-8">
-                <h2 class="text-2xl font-black text-white tracking-tight italic uppercase">ICS <span class="text-blue-500">Portal</span></h2>
-                <p id="authSubtitle" class="text-slate-500 text-[10px] font-mono uppercase mt-1 tracking-widest">Identity & Access Management</p>
-            </div>
-            
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-[10px] font-mono uppercase text-slate-400 mb-2">Username / Login ID</label>
-                    <input type="text" id="authUsername" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors">
-                </div>
-                
-                <div id="emailFieldContainer" class="hidden transition-all duration-200">
-                    <label class="block text-[10px] font-mono uppercase text-slate-400 mb-2">Corporate Email Address</label>
-                    <input type="email" id="authEmail" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors" placeholder="operator@company.com">
-                </div>
-                
-                <div>
-                    <label class="block text-[10px] font-mono uppercase text-slate-400 mb-2">Password</label>
-                    <input type="password" id="authPassword" class="w-full bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition-colors">
-                    <p id="passwordHint" class="hidden text-[9px] text-slate-500 mt-2 font-mono leading-relaxed">
-                        ⚠️ <span class="text-blue-400 font-bold">IEC 62443 Policy:</span> Min 10 chars, including uppercase, lowercase, numeric, and a special character.
-                    </p>
-                </div>
-                
-                <button onclick="handleAuthSubmit()" id="authPrimaryBtn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition-all mt-4">
-                    Sign In
-                </button>
-                
-                <div class="text-center mt-6">
-                    <button onclick="toggleAuthMode()" id="authToggleBtn" class="text-[10px] text-blue-400 hover:text-blue-300 font-mono uppercase tracking-widest transition-colors cursor-pointer">
-                        Need an account? Register Here
-                    </button>
-                </div>
-                <div id="authMessage" class="text-center text-xs font-mono mt-4 hidden p-3 rounded-xl bg-slate-950/50 border border-slate-800/40 text-wrap break-all"></div>
-            </div>
-        </div>
+  <!-- Charts & Metrics Container -->
+  <div style="display: flex; margin-bottom: 40px;">
+    <div style="flex: 1;">
+      <h4>Risk Breakdown Matrix</h4>
+      <!-- Chart.js or Recharts targets render perfectly here -->
+      <canvas id="cvssDistributionChart" width="200" height="200"></canvas>
     </div>
-
-    <div id="appDashboard" class="max-w-6xl mx-auto py-12 px-6 opacity-20 transition-opacity duration-500 pointer-events-none">
-        
-        <div id="adminPanel" class="hidden mb-12 p-6 bg-blue-950/40 border border-blue-800/50 rounded-2xl shadow-xl">
-            <div class="flex justify-between items-center mb-6">
-                <div>
-                    <h3 class="text-sm font-black text-white uppercase tracking-wider italic">Master Authorization Center</h3>
-                    <p class="text-xs text-slate-400">Approve users who have fully verified their email addresses within the 15-minute lease.</p>
-                </div>
-                <button onclick="loadUserManagementQueue()" class="text-[9px] font-mono uppercase tracking-widest bg-slate-800 border border-slate-700 px-3 py-1.5 rounded hover:text-blue-400 transition-colors">Refresh Queue</button>
-            </div>
-            
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <h4 class="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2">Pending Access Requests (Email Verified)</h4>
-                    <div id="pendingUsersList" class="space-y-2 max-h-48 overflow-y-auto pr-2">
-                        <p class="text-xs text-slate-600 italic font-mono">No pending requests matching requirements.</p>
-                    </div>
-                </div>
-                <div>
-                    <h4 class="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2">Active Operational Users</h4>
-                    <div id="activeUsersList" class="space-y-2 max-h-48 overflow-y-auto pr-2">
-                        <p class="text-xs text-slate-600 italic font-mono">No active users cataloged.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <header class="flex justify-between items-center border-b border-slate-800 pb-8 mb-12">
-            <div>
-                <h1 class="text-3xl font-black tracking-tight text-white italic uppercase">ICS <span class="text-blue-500 font-extrabold">Auditor</span></h1>
-                <p class="text-slate-500 text-[10px] mt-1 font-mono uppercase tracking-[0.2em]">Max CVE Tracking Engine v6.0</p>
-            </div>
-            <div class="flex items-center gap-4">
-                <span id="userBadge" class="text-[10px] font-mono uppercase px-3 py-1.5 rounded bg-slate-800 border border-slate-700 text-slate-400">User: Guest</span>
-                <button onclick="logout()" class="text-[10px] font-mono text-red-400 hover:text-red-300 uppercase tracking-widest">Logout</button>
-            </div>
-        </header>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
-            <div class="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 shadow-xl">
-                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-3 tracking-widest">1. Asset Inventory Upload</label>
-                <input type="file" id="csvFile" accept=".csv" class="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer">
-            </div>
-            <div class="flex flex-col justify-center">
-                <button onclick="runAudit()" id="scanBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-8 rounded-xl transition-all active:scale-95 text-md uppercase tracking-wider">Generate Risk Report</button>
-                <div id="status" class="mt-4 text-center font-mono text-[10px] text-yellow-500 hidden uppercase tracking-[0.3em] animate-pulse">Parsing Risk Profiles...</div>
-            </div>
-        </div>
-
-        <div class="bg-slate-900/80 rounded-2xl border border-slate-800 overflow-hidden shadow-2xl">
-            <table class="w-full text-left">
-                <thead class="bg-slate-800/50 text-slate-500 text-[10px] uppercase tracking-[0.2em]">
-                    <tr>
-                        <th class="p-5">Asset Details</th>
-                        <th class="p-5 text-center border-x border-slate-800/50">Firmware</th>
-                        <th class="p-5 text-center">Max CVE ID</th>
-                        <th class="p-5 text-center border-x border-slate-800/50">Risk Score</th>
-                        <th class="p-5 text-right font-bold italic">Tactic</th>
-                    </tr>
-                </thead>
-                <tbody id="auditTable" class="text-sm">
-                    <tr><td colspan="5" class="p-20 text-center text-slate-700 italic font-mono text-[10px] uppercase tracking-widest">Ready for analysis...</td></tr>
-                </tbody>
-            </table>
-        </div>
+    <div style="flex: 1; padding-left: 20px;">
+      <h4>Executive Summary Metrics</h4>
+      <p><b>Total Processed Assets:</b> <span id="lblTotalAssets">0</span></p>
+      <p><b>Max Severity Score Detected:</b> <span id="lblMaxCvss">0.0</span></p>
     </div>
+  </div>
 
-    <script>
-        const WORKER_URL = "https://icsvulscore.cloudflare-rushikeshk155.workers.dev";
-        let resultsData = []; let isLoginMode = true; let currentUser = null; let currentToken = "";
-
-        function showMessage(msg, isError = false) {
-            const el = document.getElementById('authMessage');
-            el.innerText = msg;
-            el.className = `text-center text-xs font-mono mt-4 block p-3 rounded-xl ${isError ? 'text-red-400 bg-red-500/5 border border-red-500/20' : 'text-green-400 bg-green-500/5 border border-green-500/20'}`;
-        }
-
-        function toggleAuthMode() {
-            isLoginMode = !isLoginMode;
-            document.getElementById('authPrimaryBtn').innerText = isLoginMode ? 'Sign In' : 'Register Account';
-            document.getElementById('authToggleBtn').innerText = isLoginMode ? 'Need an account? Register Here' : 'Back to Login';
-            document.getElementById('authSubtitle').innerText = isLoginMode ? 'Identity & Access Management' : 'Create New System Account';
-            
-            const hint = document.getElementById('passwordHint');
-            const emailContainer = document.getElementById('emailFieldContainer');
-            
-            if (isLoginMode) {
-                hint.classList.add('hidden');
-                emailContainer.classList.add('hidden');
-            } else {
-                hint.classList.remove('hidden');
-                emailContainer.classList.remove('hidden');
-            }
-        }
-
-        function validateIEC62443Password(pwd) {
-            return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]).{10,}$/.test(pwd);
-        }
-
-        async function handleAuthSubmit() {
-            const u = document.getElementById('authUsername').value.trim();
-            const p = document.getElementById('authPassword').value.trim();
-            const e = document.getElementById('authEmail').value.trim();
-            
-            if(!u || !p) return showMessage("Provide credentials", true);
-            if(!isLoginMode && !e) return showMessage("Email field required", true);
-
-            if (!isLoginMode && !validateIEC62443Password(p)) {
-                return showMessage("Password violates IEC 62443 strength rules.", true);
-            }
-
-            const endpoint = isLoginMode ? '/auth/login' : '/auth/register';
-            const bodyContent = isLoginMode ? { username: u, password: p } : { username: u, password: p, email: e };
-            
-            try {
-                const res = await fetch(`${WORKER_URL}${endpoint}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(bodyContent)
-                });
-                const data = await res.json();
-                
-                if(!res.ok) throw new Error(data.error || "Authentication failed");
-
-                if (!isLoginMode) {
-                    showMessage("Account initialization successful! A secure activation link has been sent directly to your corporate inbox. Verify it within 15 minutes to join the authorization queue.");
-                    toggleAuthMode();
-                } else {
-                    currentUser = data.user; currentToken = data.token;
-                    document.getElementById('authPortal').classList.add('hidden');
-                    document.getElementById('appDashboard').classList.remove('opacity-20', 'pointer-events-none');
-                    document.getElementById('userBadge').innerText = `User: ${currentUser.username} (${currentUser.role})`;
-
-                    if(currentUser.role === 'admin') {
-                        document.getElementById('adminPanel').classList.remove('hidden');
-                        loadUserManagementQueue();
-                    }
-                }
-            } catch (err) { showMessage(err.message, true); }
-        }
-
-        async function loadUserManagementQueue() {
-            try {
-                const resPending = await fetch(`${WORKER_URL}/admin/pending`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
-                const pending = await resPending.json();
-                const pContainer = document.getElementById('pendingUsersList');
-                pContainer.innerHTML = "";
-                
-                if(pending.length === 0) {
-                    pContainer.innerHTML = `<p class="text-xs text-slate-600 italic font-mono">No pending requests matching requirements.</p>`;
-                } else {
-                    pending.forEach(u => {
-                        pContainer.innerHTML += `
-                            <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                                <span class="text-xs font-mono text-slate-300">${u.username} <span class="text-[9px] text-slate-500">(${u.email})</span></span>
-                                <button onclick="approveUser(${u.id})" class="text-[9px] font-bold bg-green-600/20 text-green-400 hover:bg-green-600 hover:text-white border border-green-500/20 px-3 py-1 rounded">Approve</button>
-                            </div>
-                        `;
-                    });
-                }
-
-                const resActive = await fetch(`${WORKER_URL}/admin/active-users`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
-                const active = await resActive.json();
-                const aContainer = document.getElementById('activeUsersList');
-                aContainer.innerHTML = "";
-
-                active.forEach(u => {
-                    const isAdmin = u.role === 'admin';
-                    aContainer.innerHTML += `
-                        <div class="flex justify-between items-center bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                            <div><span class="text-xs font-mono text-slate-300">${u.username}</span><span class="text-[8px] font-mono text-slate-500 uppercase ml-2">[${u.role}]</span></div>
-                            ${!isAdmin ? `<button onclick="promoteUser(${u.id})" class="text-[9px] font-bold bg-blue-600/20 text-blue-400 border border-blue-500/20 px-3 py-1 rounded">Make Admin</button>` : `<span class="text-[8px] text-blue-500 uppercase font-mono mr-2">Authorized</span>`}
-                        </div>
-                    `;
-                });
-            } catch(e) { console.error(e); }
-        }
-
-        async function approveUser(userId) {
-            if(await fetch(`${WORKER_URL}/admin/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` }, body: JSON.stringify({ id: userId }) })) loadUserManagementQueue();
-        }
-        async function promoteUser(userId) {
-            if(await fetch(`${WORKER_URL}/admin/promote`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentToken}` }, body: JSON.stringify({ id: userId }) })) loadUserManagementQueue();
-        }
-        function logout() { window.location.reload(); }
-
-        async function runAudit() {
-            const fileInput = document.getElementById('csvFile'); if (!fileInput.files[0]) return alert("Upload asset inventory CSV.");
-            const table = document.getElementById('auditTable'); const status = document.getElementById('status');
-            table.innerHTML = ""; resultsData = []; status.classList.remove('hidden');
-
-            Papa.parse(fileInput.files[0], {
-                header: true, skipEmptyLines: true,
-                complete: async function(results) {
-                    const assets = results.data;
-                    for (let i = 0; i < assets.length; i++) {
-                        const asset = assets[i]; const fw = asset.Firmware || asset.firmware || "";
-                        try {
-                            const res = await fetch(`${WORKER_URL}/?make=${encodeURIComponent(asset.Make)}&model=${encodeURIComponent(asset.Model)}&firmware=${encodeURIComponent(fw)}`, { headers: { 'Authorization': `Bearer ${currentToken}` } });
-                            const data = await res.json(); const top = data.vulnerabilities[0] || {};
-                            const entry = { Asset_ID: asset.Asset_ID || 'N/A', Make: asset.Make, Model: asset.Model, Firmware: fw, Max_CVE_ID: top.cve_id || 'NONE', Risk_Score: top.ics_weighted_score || 0, Tactic: top.tactic || 'NONE' };
-                            resultsData.push(entry); renderRow(entry);
-                        } catch (err) { console.error(err); }
-                    }
-                    status.classList.add('hidden');
-                }
-            });
-        }
-
-        function renderRow(r) {
-            let scoreColor = "text-slate-500"; let cveColor = "text-slate-400";
-            if (r.Risk_Score >= 9) { scoreColor = "text-red-500 font-black"; cveColor = "text-red-400 font-semibold"; }
-            else if (r.Risk_Score >= 7) { scoreColor = "text-orange-500 font-bold"; cveColor = "text-orange-400"; }
-            document.getElementById('auditTable').innerHTML += `
-                <tr class="border-t border-slate-800/50 hover:bg-blue-500/5 text-xs">
-                    <td class="p-5"><strong>${r.Asset_ID}</strong><br><span class="text-[9px] text-slate-500 font-mono">${r.Make} ${r.Model}</span></td>
-                    <td class="p-5 text-center font-mono text-blue-400">${r.Firmware || 'ANY'}</td>
-                    <td class="p-5 text-center font-mono ${cveColor}">${r.Max_CVE_ID}</td>
-                    <td class="p-5 text-center border-x border-slate-800/50 ${scoreColor} font-bold text-base">${r.Risk_Score > 0 ? r.Risk_Score : '--'}</td>
-                    <td class="p-5 text-right"><span class="text-[9px] bg-slate-800 border px-2 py-0.5 rounded text-slate-500 font-mono">${r.Tactic}</span></td>
-                </tr>
-            `;
-        }
-    </script>
-</body>
-</html>
+  <!-- Asset Telemetry Data Table -->
+  <h4>Prioritized Vulnerability Line-Items</h4>
+  <table style="width: 100%; border-collapse: collapse;">
+    <thead>
+      <tr style="background-color: #f1f5f9; text-align: left;">
+        <th style="padding: 8px; border: 1px solid #cbd5e1;">CVE ID</th>
+        <th style="padding: 8px; border: 1px solid #cbd5e1;">Target Component</th>
+        <th style="padding: 8px; border: 1px solid #cbd5e1;">CVSS Score</th>
+      </tr>
+    </thead>
+    <tbody id="reportTableBody">
+      <!-- Generated CSV calculation array rows inject dynamically here -->
+    </tbody>
+  </table>
+</div>
