@@ -4,8 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ICS Risk Auditor | Security Portal</title>
+    <!-- Tailwind CSS Engine -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- CSV Parser Engine -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- HTML-to-PDF Core Dependency -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- Chart Visualizer Dependency -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght=400;600;800&family=JetBrains+Mono&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -14,7 +20,7 @@
 </head>
 <body class="bg-[#0b1120] text-slate-200 min-h-screen">
 
-    <!-- 🔑 RESTORED ACCESS CONTROL PORTAL -->
+    <!-- Access Control Portal -->
     <div id="authPortal" class="fixed inset-0 bg-[#070a13] z-50 flex items-center justify-center p-6">
         <div class="bg-slate-900/80 border border-slate-800 p-8 rounded-2xl w-full max-w-md shadow-2xl backdrop-blur-md">
             <div class="text-center mb-8">
@@ -55,7 +61,7 @@
         </div>
     </div>
 
-    <!-- 🎛️ RESTORED MANAGEMENT AUDIT DASHBOARD SHELL -->
+    <!-- Management Audit Dashboard Shell -->
     <div id="appDashboard" class="max-w-6xl mx-auto py-12 px-6 opacity-20 transition-opacity duration-500 pointer-events-none">
         
         <div id="adminPanel" class="hidden mb-12 p-6 bg-blue-950/40 border border-blue-800/50 rounded-2xl shadow-xl">
@@ -102,7 +108,7 @@
             <div class="flex gap-4 items-center">
                 <button onclick="runAudit()" id="scanBtn" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl transition-all active:scale-95 text-sm uppercase tracking-wider">Generate Risk Report</button>
                 
-                <!-- 🚀 SAFE BACKEND PDF GENERATOR ACTION TRIGGER ELEMENT -->
+                <!-- PDF Add-on Hook Component Button -->
                 <button onclick="exportAuditPDF()" id="pdfBtn" class="hidden bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 font-bold py-4 px-6 rounded-xl transition-all active:scale-95 text-sm uppercase tracking-wider">Download PDF</button>
                 
                 <div id="status" class="mt-4 text-center font-mono text-[10px] text-yellow-500 hidden uppercase tracking-[0.3em] animate-pulse">Parsing Risk Profiles...</div>
@@ -127,6 +133,50 @@
         </div>
     </div>
 
+    <!-- Hidden Visual Template for PDF Canvas Generation -->
+    <div class="hidden">
+        <div id="pdf-report-layout" class="bg-[#0b1120] text-slate-200 p-10 w-[750px] font-sans">
+            <div class="border-b border-slate-800 pb-6 mb-8 flex justify-between items-end">
+                <div>
+                    <h1 class="text-2xl font-black tracking-tight text-white uppercase italic">ICS <span class="text-blue-500">Auditor</span> Report</h1>
+                    <p class="text-slate-500 text-[9px] font-mono uppercase mt-1 tracking-widest">Compliance Framework: IEC 62443</p>
+                </div>
+                <div class="text-right text-[10px] font-mono text-slate-400">
+                    <p id="pdf-meta-user">User: Operator</p>
+                    <p id="pdf-meta-date">Date: MM/DD/YYYY</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-6 mb-8">
+                <div class="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 flex flex-col justify-center">
+                    <h3 class="text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-4">Quantitative Risk Metrics</h3>
+                    <div class="space-y-2 text-sm">
+                        <p>Total Assessed Hardware: <span id="pdf-stat-total" class="font-bold text-white">0</span></p>
+                        <p>Max Component Risk Vector: <span id="pdf-stat-max" class="font-bold text-red-500">0.0</span></p>
+                    </div>
+                </div>
+                <div class="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 flex justify-center items-center h-48">
+                    <canvas id="pdfDistributionChart"></canvas>
+                </div>
+            </div>
+
+            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Prioritized Threat Matrix</h3>
+            <div class="bg-slate-900/80 rounded-xl border border-slate-800 overflow-hidden">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-800/50 text-slate-400 text-[9px] uppercase tracking-wider">
+                        <tr>
+                            <th class="p-3">Asset Target</th>
+                            <th class="p-3 text-center">Max CVE</th>
+                            <th class="p-3 text-center">Risk Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pdfTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core Runtime Scripts -->
     <script>
         const WORKER_URL = "https://icsvulscore.cloudflare-rushikeshk155.workers.dev";
         let resultsData = []; let isLoginMode = true; let currentUser = null; let currentToken = "";
@@ -287,66 +337,9 @@
                 </tr>
             `;
         }
-
-        // 🚀 INTERNAL ENCODED PDF MATRIX ENGINE
-        function exportAuditPDF() {
-            if (resultsData.length === 0) return alert("No calculated rows available to print.");
-
-            const totalAssets = resultsData.length;
-            const maxScore = Math.max(...resultsData.map(r => r.Risk_Score));
-            const criticalCount = resultsData.filter(r => r.Risk_Score >= 7).length;
-
-            const criticalRatio = Math.round((criticalCount / totalAssets) * 10);
-            let graphBar = "";
-            for (let i = 0; i < 10; i++) graphBar += i < criticalRatio ? "■" : "░";
-
-            let stream = "BT\n/F1 10 Tf\n12 TL\n40 780 Td\n";
-            const escapeTxt = (s) => String(s || '').replace(/[\\()]/g, "\\$&").replace(/\s+/g, " ");
-
-            stream += `(INDUSTRIAL RISK AUDITOR SUMMARY REPORT) Tj T*\n`;
-            stream += `(COMPLIANCE FRAMEWORK: IEC 62443 PROTOCOLS) Tj T*\n`;
-            stream += `(Generated By: ${escapeTxt(currentUser ? currentUser.username : 'Operator')} | Date: ${new Date().toLocaleDateString()}) Tj T*\n`;
-            stream += `(==========================================================================) Tj T*\n\n`;
-
-            stream += `(ENVIRONMENT QUANTITATIVE ANOMALY METRICS) Tj T*\n`;
-            stream += `(----------------------------------------) Tj T*\n`;
-            stream += `(Total Assessed Hardened Inventories : ${totalAssets}) Tj T*\n`;
-            stream += `(Maximum Component Severity Vector  : ${maxScore.toFixed(1)} / 10.0) Tj T*\n`;
-            stream += `(Critical-Risk Exposure Footprint   : ${criticalCount} Items) Tj T*\n`;
-            stream += `(Risk Breakdown Chart [CRITICAL]    : [${graphBar}] ${Math.round((criticalCount/totalAssets)*100)}%) Tj T*\n`;
-            stream += `(==========================================================================) Tj T*\n\n`;
-
-            stream += `(PRIORITIZED COMPONENT THREAT MATRIX) Tj T*\n`;
-            stream += `(-----------------------------------) Tj T*\n`;
-
-            resultsData.forEach((r, idx) => {
-                const statusLabel = r.Risk_Score >= 9 ? "CRITICAL" : (r.Risk_Score >= 7 ? "HIGH" : "MEDIUM/LOW");
-                stream += `(${idx + 1}. [${escapeTxt(r.Asset_ID)}] Model: ${escapeTxt(r.Make)} ${escapeTxt(r.Model)} [FW: ${escapeTxt(r.Firmware)}]) Tj T*\n`;
-                stream += `(   Max Vulnerability: ${escapeTxt(r.Max_CVE_ID)} | Weighted Score: ${r.Risk_Score} [Severity: ${statusLabel}]) Tj T*\n`;
-                stream += `(   MITRE ATT&CK Mapping Tactic Reference: ${escapeTxt(r.Tactic)}) Tj T*\n`;
-                stream += `(--------------------------------------------------------------------------) Tj T*\n`;
-            });
-
-            stream += "ET";
-
-            const encoder = new TextEncoder();
-            const textBytes = encoder.encode(stream);
-            const streamLength = textBytes.length;
-
-            const structure = `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Courier >> >> >> >>\nendobj\n4 0 obj\n<< /Length ${streamLength} >>\nstream\n`;
-            const footer = `\nendstream\nendobj\nxref\n0 5\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000282 00000 n \ntrailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n${282 + streamLength + 15}\n%%EOF`;
-
-            const headBytes = encoder.encode(structure);
-            const footBytes = encoder.encode(footer);
-            const buffer = new Uint8Array(headBytes.length + textBytes.length + footBytes.length);
-            buffer.set(headBytes, 0); buffer.set(textBytes, headBytes.length); buffer.set(footBytes, headBytes.length + textBytes.length);
-
-            const blob = new Blob([buffer], { type: "application/pdf" });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `ICS_Vulnerability_Report_${new Date().toISOString().slice(0,10)}.pdf`;
-            link.click();
-        }
     </script>
+
+    <!-- 🔗 ADD-ON INTEGRATION LINK -->
+    <script src="pdf-addon.js"></script>
 </body>
 </html>
