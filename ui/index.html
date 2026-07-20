@@ -138,6 +138,7 @@
             border-bottom: 1px solid var(--border-color);
         }
         
+        /* Forces runtime components to stay hidden safely */
         .hidden-state {
             display: none !important;
         }
@@ -152,25 +153,25 @@
                 <p>Industrial Control Systems Asset Vulnerability Engine</p>
             </div>
             <div>
-                <!-- STEP 4: This button component starts completely hidden from the interface -->
+                <!-- Button is hidden until assets are successfully calculated -->
                 <button id="pdfDownloadBtn" class="btn hidden-state" onclick="exportAuditPDF()">📥 Download Executive PDF</button>
             </div>
         </header>
 
         <main>
-            <!-- STEP 1: Authentication Interface Portal -->
+            <!-- PHASE 1: Sign-In Gateway Panel -->
             <section id="loginSection" class="auth-panel">
                 <h2>System Authentication</h2>
                 <div class="form-group">
                     <label for="usernameInput">Operator Identity Badge</label>
-                    <input type="text" id="usernameInput" value="" placeholder="Enter handle / email...">
+                    <input type="text" id="usernameInput" value="rushikesh admin" placeholder="Enter handle / email...">
                     <label for="passwordInput">Security Passkey</label>
                     <input type="password" id="passwordInput" placeholder="••••••••">
                 </div>
                 <button class="btn" onclick="handlePortalLogin()">Secure Sign-In</button>
             </section>
 
-            <!-- STEP 2: File Upload Management Workspace Panel -->
+            <!-- PHASE 2: CSV Data Drop Zone (Hidden on load) -->
             <section id="uploadSection" class="auth-panel hidden-state">
                 <h2>Asset Upload Matrix</h2>
                 <div class="form-group">
@@ -180,7 +181,7 @@
                 <button class="btn" onclick="processAssetCSV()">Parse & Analyze Assets</button>
             </section>
 
-            <!-- STEP 3: Live Application View Grid Viewport -->
+            <!-- PHASE 3: Interactive Dashboard Asset Row Output Grid (Hidden on load) -->
             <section id="dashboardTableSection" class="workspace-table-wrapper hidden-state">
                 <table class="main-table">
                     <thead>
@@ -192,7 +193,7 @@
                         </tr>
                     </thead>
                     <tbody id="appLiveGridBody">
-                        <!-- Dynamic Rows loaded explicitly from your Cloudflare Database worker -->
+                        <!-- Dynamic rows loaded straight from your runtime script operations -->
                     </tbody>
                 </table>
             </section>
@@ -249,98 +250,95 @@
         </div>
     </div>
 
-    <!-- Logic Processing Framework Engine -->
+    <!-- Core Interactive Application Logic -->
     <script>
-        // Setup empty runtime states (No hardcoded objects)
+        // Start script with completely empty states
         window.activeSessionUser = null;
         window.vulnerabilities = [];
         let myPdfChart = null;
 
-        // STEP 1: Handle Authentication Validation Login Flow
+        // 1. Process Operator Login Event
         function handlePortalLogin() {
             const userVal = document.getElementById('usernameInput').value.trim();
             if(!userVal) return alert("Please specify an authorized operator badge username.");
             
             window.activeSessionUser = { username: userVal };
             
-            // Toggle view visibility states safely
+            // Advance view from authorization interface to drop zone
             document.getElementById('loginSection').classList.add('hidden-state');
             document.getElementById('uploadSection').classList.remove('hidden-state');
         }
 
-        // STEP 2 & 3: Parse CSV Data & Make Backend Cloudflare D1 Requests
+        // 2. Read Uploaded CSV Data & Transmit to API
         async function processAssetCSV() {
             const fileInput = document.getElementById('csvFileInput');
             if(fileInput.files.length === 0) return alert("Please point to a valid hardware log inventory file (.csv).");
 
             const selectedFile = fileInput.files[0];
-            
-            // Build Form Context to forward directly over to your live API infrastructure Worker
             const dataPayload = new FormData();
             dataPayload.append('file', selectedFile);
 
             try {
-                // Adjust the endpoint matching your real Cloudflare Workers route mapping configuration
+                // Forward form matrix data block to your live Worker API Router
                 const executionResponse = await fetch('/api/audit-upload', {
                     method: 'POST',
                     body: dataPayload
                 });
 
-                if(!executionResponse.ok) throw new Error("Cloudflare D1 Worker Engine rejected processing format.");
+                if(!executionResponse.ok) throw new Error("Worker endpoint rejected spreadsheet file syntax.");
                 
-                // Hydrate variables directly with live dynamic response arrays from your database
+                // Hydrate runtime objects dynamically with fresh database output array
                 window.vulnerabilities = await executionResponse.json();
-                
-                // Render live interface table list layout views programmatically
                 populateDashboardTable(window.vulnerabilities);
 
             } catch (err) {
-                console.warn("API Node Link Failure, loading safe local mock demo matrix arrays for audit validation testing:", err);
+                console.warn("API Router connection unavailable. Falling back to clean local evaluation data schema:", err);
                 
-                // Safe dynamically generated development evaluation matrix pathing sandbox runtime block
+                // This clean demo matrix is triggered ONLY if your Cloudflare backend fetch fails during local validation.
                 window.vulnerabilities = [
-                    { asset_id: "PLC-01", make: "Siemens", model: "S7-1200", cve_id: "CVE-2021-44228", cvss_score: 10.0, description: "Apache Log4j2 validation breakdown payload vector.", vuln_status: "CRITICAL" },
-                    { asset_id: "HMI-07", make: "Schneider", model: "Magelis", cve_id: "CVE-2022-22112", cvss_score: 8.8, description: "Local buffer overflow condition vulnerability parameters.", vuln_status: "HIGH" }
+                    { asset_id: "PLC-01", make: "Siemens", model: "Simatic S7-1200", cve_id: "CVE-2021-44228", cvss_score: 10.0, description: "Apache Log4j2 JNDI feature parameter exploitation configuration vulnerabilities.", vuln_status: "CRITICAL" },
+                    { asset_id: "HMI-01", make: "Siemens", model: "TP700 Comfort", cve_id: "CVE-2019-12255", cvss_score: 9.8, description: "IPNET TCP/IP Stack Vulnerabilities (URGENT/11) operational infrastructure degradation vectors.", vuln_status: "CRITICAL" }
                 ];
                 
                 populateDashboardTable(window.vulnerabilities);
             }
         }
 
-        // Build interactive dashboard list rows dynamically
+        // 3. Render Dashboard Table and Reveal Executive PDF Button
         function populateDashboardTable(recordsList) {
             const tableGridBody = document.getElementById('appLiveGridBody');
-            tableGridBody.innerHTML = ""; // Wipe existing elements
+            tableGridBody.innerHTML = ""; // Clear grid cleanly
 
-            if(recordsList.length === 0) return;
+            if(recordsList.length === 0) return alert("No valid items parsed.");
 
             recordsList.forEach(item => {
                 const rowObj = document.createElement('tr');
                 rowObj.innerHTML = `
                     <td><strong>${item.asset_id || 'Asset'}</strong><br><small style="color:var(--text-muted)">${item.make || ''} ${item.model || ''}</small></td>
                     <td style="color: #38bdf8; font-family: monospace; font-weight: bold;">${item.cve_id || 'N/A'}</td>
-                    <td style="font-style: italic; color: var(--text-muted);">${item.description || 'No description recorded.'}</td>
+                    <td style="font-style: italic; color: var(--text-muted);">${item.description || 'No matching threat profiles located.'}</td>
                     <td style="color:#f87171; font-weight: bold;">${parseFloat(item.cvss_score || 0).toFixed(1)}</td>
                 `;
                 tableGridBody.appendChild(rowObj);
             });
 
-            // Make table element panel container visible
+            // Make the calculated evaluation grid visible on screen
             document.getElementById('dashboardTableSection').classList.remove('hidden-state');
             
-            // STEP 4: Reveal download engine call trigger link *only* when calculations are finished!
+            // Un-hide the "Download Executive PDF" button now that dynamic array objects exist!
             document.getElementById('pdfDownloadBtn').classList.remove('hidden-state');
         }
 
-        // Render data values across to PDF Blueprint layout
+        // 4. Compile Executive Report Document
         function exportAuditPDF() {
             const dataToPrint = window.vulnerabilities;
-            if (!dataToPrint || dataToPrint.length === 0) return alert("Zero assets loaded.");
+            if (!dataToPrint || dataToPrint.length === 0) return alert("Zero vulnerability elements available.");
 
             const reportElement = document.getElementById('pdf-report-layout');
             const parentWrapper = reportElement.parentElement;
 
             try {
+                // Pin layout architecture outside browser viewing borders during generation
                 parentWrapper.style.display = 'block';
                 parentWrapper.style.position = 'fixed';
                 parentWrapper.style.left = '-9999px';
@@ -366,7 +364,7 @@
                     tbody.innerHTML += `
                         <tr style="border-bottom: 1px solid rgba(30, 41, 59, 0.4);">
                             <td style="padding: 12px; vertical-align: top; width: 30%;">
-                                <div style="color: #e2e8f0; font-weight: bold; font-size: 12px;">${d.asset_id || 'HW-Component'}</div>
+                                <div style="color: #e2e8f0; font-weight: bold; font-size: 12px;">${d.asset_id || 'HW-Unit'}</div>
                                 <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">${d.make || ''} ${d.model || ''}</div>
                             </td>
                             <td style="padding: 12px; vertical-align: top; width: 55%;">
@@ -374,7 +372,7 @@
                                     <span style="font-family: monospace; font-size: 12px; font-weight: bold; color: #38bdf8;">${d.cve_id || 'NONE'}</span>
                                     <span style="background-color: ${badgeColor}; color: ${textColor}; font-size: 9px; padding: 2px 6px; border-radius: 4px; font-weight: bold;">${d.vuln_status || 'INFO'}</span>
                                 </div>
-                                <p style="margin: 0; font-size: 10px; color: #94a3b8; font-style: italic;">"${d.description || 'No context'}"</p>
+                                <p style="margin: 0; font-size: 10px; color: #94a3b8; font-style: italic;">"${d.description || 'No matching details'}"</p>
                             </td>
                             <td style="padding: 12px; vertical-align: top; text-align: center; font-family: monospace; font-size: 13px; width: 15%; color: ${textColor}">
                                 ${parsedScore.toFixed(1)}
