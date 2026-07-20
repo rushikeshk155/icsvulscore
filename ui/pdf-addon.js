@@ -1,12 +1,11 @@
 /**
  * ICS Risk Auditor PDF Export Engine Add-on
- * Updated to match the backend D1 database column naming conventions.
+ * Updated with strict type-casting to catch both string and numeric risk scores.
  */
 
 let myPdfChart = null;
 
 function exportAuditPDF() {
-    // 1. Check if data exists (handling both resultsData array or standard array format)
     if (typeof resultsData === 'undefined' || resultsData.length === 0) {
         return alert("No calculated rows available to print. Please run the audit scan first.");
     }
@@ -23,13 +22,29 @@ function exportAuditPDF() {
         parentWrapper.style.top = '0';
         parentWrapper.style.zIndex = '-9999';
 
-        // 2. Compute Data Summaries using actual DB properties: 'cvss_score'
-        const totalAssets = resultsData.length;
-        const maxScore = Math.max(...resultsData.map(r => r.cvss_score || 0));
-        const criticalCount = resultsData.filter(r => (r.cvss_score || 0) >= 7).length;
+        // 🚨 CRITICAL DATA NORMALIZATION: Check both potential keys and force them into float numbers
+        const normalizedData = resultsData.map(r => {
+            const rawScore = r.Risk_Score !== undefined ? r.Risk_Score : (r.cvss_score !== undefined ? r.cvss_score : 0);
+            const rawCve = r.Max_CVE_ID || r.cve_id || 'NONE';
+            const rawAsset = r.Asset_ID || null;
+            const rawMake = r.Make || '';
+            const rawModel = r.Model || '';
+            
+            return {
+                assetId: rawAsset,
+                makeModel: rawMake || rawModel ? `${rawMake} ${rawModel}`.trim() : 'Scan Match',
+                cveId: rawCve,
+                score: parseFloat(rawScore) || 0
+            };
+        });
+
+        // Compute Summaries accurately using normalized numbers
+        const totalAssets = normalizedData.length;
+        const maxScore = Math.max(...normalizedData.map(d => d.score));
+        const criticalCount = normalizedData.filter(d => d.score >= 7.0).length;
         const lowMediumCount = totalAssets - criticalCount;
 
-        // 3. Hydrate Document Metadata
+        // Hydrate Document Metadata
         let activeUsername = "Operator";
         if (typeof currentUser !== 'undefined' && currentUser && currentUser.username) {
             activeUsername = currentUser.username;
@@ -40,24 +55,24 @@ function exportAuditPDF() {
         document.getElementById('pdf-stat-total').innerText = totalAssets;
         document.getElementById('pdf-stat-max').innerText = maxScore.toFixed(1);
 
-        // 4. Rebuild Table Rows mapping to 'cve_id' and 'cvss_score'
+        // Rebuild Table Rows mapping exactly to the UI display states
         const tbody = document.getElementById('pdfTableBody');
         tbody.innerHTML = "";
         
-        resultsData.forEach((r, index) => {
-            const score = r.cvss_score || 0;
-            let scoreClass = score >= 7 ? "text-red-400 font-bold" : "text-slate-300";
+        normalizedData.forEach((d, index) => {
+            let scoreClass = d.score >= 7.0 ? "text-red-400 font-bold" : "text-slate-300";
+            let displayName = d.assetId ? `<strong>${d.assetId}</strong>` : `<strong>Asset #${index + 1}</strong>`;
             
             tbody.innerHTML += `
                 <tr class="border-t border-slate-800/40 text-[11px]">
-                    <td class="p-3"><strong>Asset #${index + 1}</strong><br><span class="text-[9px] text-slate-500">Scan Match</span></td>
-                    <td class="p-3 text-center font-mono text-slate-400">${r.cve_id || 'NONE'}</td>
-                    <td class="p-3 text-center font-mono ${scoreClass}">${score > 0 ? score : '0'}</td>
+                    <td class="p-3">${displayName}<br><span class="text-[9px] text-slate-500">${d.makeModel}</span></td>
+                    <td class="p-3 text-center font-mono text-slate-400">${d.cveId}</td>
+                    <td class="p-3 text-center font-mono ${scoreClass}">${d.score > 0 ? d.score.toFixed(1) : '0'}</td>
                 </tr>
             `;
         });
 
-        // 5. Initialize Canvas Chart Instance
+        // Initialize Canvas Chart Instance with updated metrics
         if (myPdfChart) { myPdfChart.destroy(); }
         
         const ctx = document.getElementById('pdfDistributionChart').getContext('2d');
@@ -82,7 +97,7 @@ function exportAuditPDF() {
             }
         });
 
-        // 6. Generate the Document Layout
+        // Generate the Layout
         setTimeout(() => {
             const configOptions = {
                 margin:       [10, 10, 10, 10],
@@ -93,11 +108,10 @@ function exportAuditPDF() {
             };
 
             html2pdf().set(configOptions).from(reportElement).save().then(() => {
-                // Re-hide completely once execution concludes
                 parentWrapper.classList.add('hidden');
                 parentWrapper.style.position = '';
             }).catch((err) => {
-                console.error("PDF generation engine processing failure:", err);
+                console.error("PDF generation error:", err);
                 parentWrapper.classList.add('hidden');
             });
             
