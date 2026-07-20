@@ -135,45 +135,46 @@
 
     <!-- Hidden Blueprint Layout captured cleanly by the html2pdf engine -->
     <div class="hidden">
-        <div id="pdf-report-layout" class="bg-[#0b1120] text-slate-200 p-10 w-[750px] font-sans">
+        <!-- Expanded width frame boundary context configuration container layer to fix rendering truncation defects -->
+        <div id="pdf-report-layout" class="bg-[#0b1120] text-slate-200 p-12 w-[1024px] font-sans">
             <div class="border-b border-slate-800 pb-6 mb-8 flex justify-between items-end">
                 <div>
-                    <h1 class="text-2xl font-black tracking-tight text-white uppercase italic">ICS <span class="text-blue-500">Auditor</span> Report</h1>
-                    <p class="text-slate-500 text-[9px] font-mono uppercase mt-1 tracking-widest">Compliance Framework: IEC 62443 / NIST SP 800-82</p>
+                    <h1 class="text-3xl font-black tracking-tight text-white uppercase italic">ICS <span class="text-blue-500">Auditor</span> Report</h1>
+                    <p class="text-slate-500 text-[10px] font-mono uppercase mt-1 tracking-widest">Compliance Framework: IEC 62443 / NIST SP 800-82</p>
                 </div>
-                <div class="text-right text-[10px] font-mono text-slate-400">
+                <div class="text-right text-xs font-mono text-slate-400 space-y-1">
                     <p id="pdf-meta-user">User: Operator</p>
                     <p id="pdf-meta-date">Date: MM/DD/YYYY</p>
                 </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-6 mb-8">
-                <div class="bg-slate-900/50 p-6 rounded-2xl border border-slate-800 flex flex-col justify-center">
-                    <h3 class="text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-4">Quantitative Risk Metrics</h3>
-                    <div class="space-y-2 text-sm">
-                        <p>Total Assessed Hardware: <span id="pdf-stat-total" class="font-bold text-white">0</span></p>
-                        <p>Max Component Risk Vector: <span id="pdf-stat-max" class="font-bold text-red-500">0.0</span></p>
+            <div class="grid grid-cols-12 gap-6 mb-8 items-stretch">
+                <div class="col-span-5 bg-slate-900/50 p-6 rounded-2xl border border-slate-800 flex flex-col justify-center space-y-4">
+                    <h3 class="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Quantitative Risk Metrics</h3>
+                    <div class="space-y-3 text-base">
+                        <p class="text-slate-300">Total Assessed Hardware: <span id="pdf-stat-total" class="font-mono font-bold text-white text-xl ml-2">0</span></p>
+                        <p class="text-slate-300">Max Component Risk Vector: <span id="pdf-stat-max" class="font-mono font-bold text-red-500 text-xl ml-2">0.0</span></p>
                     </div>
                 </div>
-                <div class="bg-slate-900/50 p-4 rounded-2xl border border-slate-800 flex justify-center items-center h-48">
-                    <canvas id="pdfDistributionChart" style="max-height: 160px; max-width: 100%;"></canvas>
+                <div class="col-span-7 bg-slate-900/50 p-6 rounded-2xl border border-slate-800 flex justify-center items-center h-56">
+                    <canvas id="pdfDistributionChart"></canvas>
                 </div>
             </div>
 
-            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Prioritized Threat Matrix</h3>
+            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Prioritized Threat Matrix</h3>
             <div class="bg-slate-900/80 rounded-xl border border-slate-800 overflow-hidden">
-                <table class="w-full text-left text-xs">
-                    <thead class="bg-slate-800/50 text-slate-400 text-[9px] uppercase tracking-wider">
+                <table class="w-full text-left table-fixed">
+                    <thead class="bg-slate-800/50 text-slate-400 text-[10px] uppercase tracking-wider">
                         <tr>
-                            <th class="p-3">Asset Target</th>
-                            <th class="p-3 text-center">Threat Intel & Max CVE</th>
-                            <th class="p-3 text-center">Risk Score</th>
+                            <th class="p-4 w-[25%]">Asset Target</th>
+                            <th class="p-4 w-[60%]">Threat Intel & Max CVE</th>
+                            <th class="p-4 w-[15%] text-center">Risk Score</th>
                         </tr>
                     </thead>
-                    <tbody id="pdfTableBody"></tbody>
+                    <tbody id="pdfTableBody" class="divide-y divide-slate-800/60"></tbody>
                 </table>
             </div>
-            <div class="mt-8 pt-4 border-t border-slate-800 text-center font-mono text-[8px] text-slate-600 tracking-wider">
+            <div class="mt-12 pt-6 border-t border-slate-800 text-center font-mono text-[9px] text-slate-600 tracking-wider">
                 Automated ICS Vulnerability Assessment Matrix • Confidential Cryptographic Integrity Report
             </div>
         </div>
@@ -364,13 +365,13 @@
             const parentWrapper = reportElement.parentElement;
 
             try {
-                // Provision layout context frame hidden outside visible browser bounds
+                // Provision layout context frame hidden outside visible browser bounds safely
                 parentWrapper.classList.remove('hidden');
                 parentWrapper.style.position = 'fixed';
                 parentWrapper.style.left = '-9999px';
                 parentWrapper.style.top = '0';
 
-                // Sync dynamic session metadata parameters cleanly
+                // Sync dynamic session metadata parameters cleanly without clipping strings
                 let activeUser = "Auditor Session Profile";
                 if (currentUser && currentUser.username) {
                     activeUser = `${currentUser.username} (${currentUser.role})`;
@@ -399,16 +400,19 @@
                     else if (scoreVal > 0) riskColor = "text-yellow-500";
 
                     tbody.innerHTML += `
-                        <tr class="border-t border-slate-800/60 text-[11px]">
-                            <td class="p-3">
-                                <div class="text-slate-200 font-bold">${d.Asset_ID}</div>
-                                <div class="text-[9px] text-slate-500 font-mono">${d.Make} ${d.Model} (FW: ${d.Firmware || 'ANY'})</div>
+                        <tr class="text-xs">
+                            <td class="p-4 align-top break-words">
+                                <div class="text-slate-200 font-bold text-sm">${d.Asset_ID}</div>
+                                <div class="text-[10px] text-slate-400 mt-1">${d.Make} ${d.Model}</div>
+                                <div class="text-[10px] font-mono text-blue-400 mt-0.5">FW: ${d.Firmware || 'ANY'}</div>
                             </td>
-                            <td class="p-3">
-                                <div class="font-mono font-bold text-blue-400">${d.Max_CVE_ID}</div>
-                                <div class="text-[9px] text-slate-400 mt-0.5 italic max-w-[340px] whitespace-normal">"${d.description}"</div>
+                            <td class="p-4 align-top break-words">
+                                <div class="font-mono font-bold text-blue-400 text-sm mb-1">${d.Max_CVE_ID}</div>
+                                <p class="text-[11px] text-slate-400 leading-relaxed font-normal whitespace-pre-wrap">"${d.description}"</p>
                             </td>
-                            <td class="p-3 text-center font-mono ${riskColor} text-xs font-bold">${scoreVal > 0 ? scoreVal.toFixed(1) : '--'}</td>
+                            <td class="p-4 align-top text-center font-mono text-sm font-bold ${riskColor}">
+                                ${scoreVal > 0 ? scoreVal.toFixed(1) : '--'}
+                            </td>
                         </tr>
                     `;
                 });
@@ -432,7 +436,7 @@
                         maintainAspectRatio: false,
                         animation: false,
                         plugins: {
-                            legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 9 } } }
+                            legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 11, weight: 'bold' } } }
                         }
                     }
                 });
@@ -440,10 +444,10 @@
                 // Compile and download document canvas frame safely onto client node disk workspace
                 setTimeout(() => {
                     const configOptions = {
-                        margin:       [12, 12, 12, 12],
+                        margin:       [10, 10, 10, 10],
                         filename:     `ICS_Risk_Audit_Report_${new Date().toISOString().slice(0,10)}.pdf`,
                         image:        { type: 'jpeg', quality: 0.99 },
-                        html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0b1120' },
+                        html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0b1120', logging: false },
                         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
                     };
 
@@ -453,7 +457,7 @@
                         console.error(err);
                         parentWrapper.classList.add('hidden');
                     });
-                }, 450);
+                }, 500);
 
             } catch (err) {
                 console.error(err);
