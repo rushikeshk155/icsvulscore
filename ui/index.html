@@ -133,34 +133,39 @@
         </div>
     </div>
 
-    <!-- Hidden Blueprint Layout captured cleanly by the html2pdf engine -->
-    <div class="hidden">
-        <!-- Strictly bound container to exact pixel canvas layout representation envelope to avoid truncation leaks -->
-        <div id="pdf-report-layout" class="bg-[#0b1120] text-slate-200 p-8 font-sans" style="width: 794px; box-sizing: border-box; min-height: 1123px;">
-            <div class="border-b border-slate-800 pb-6 mb-8 flex justify-between items-end">
-                <div>
+    <!-- Hidden Blueprint Container Layer -->
+    <div id="pdf-staging-layer" class="hidden">
+        <!-- Strictly dimensions the snapshot container to match A4 rendering specifications layout logic -->
+        <div id="pdf-report-layout" class="bg-[#0b1120] text-slate-200 p-10 font-sans" style="width: 800px; max-width: 800px; box-sizing: border-box;">
+            
+            <!-- Report Header Block Structure -->
+            <div class="border-b border-slate-800 pb-6 mb-8 flex justify-between items-start">
+                <div class="w-[60%]">
                     <h1 class="text-2xl font-black tracking-tight text-white uppercase italic">ICS <span class="text-blue-500">Auditor</span> Report</h1>
-                    <p class="text-slate-500 text-[9px] font-mono uppercase mt-1 tracking-widest">Compliance Framework: IEC 62443 / NIST SP 800-82</p>
+                    <p class="text-slate-500 text-[10px] font-mono uppercase mt-1 tracking-widest">Compliance Framework: IEC 62443 / NIST SP 800-82</p>
                 </div>
-                <div class="text-right text-[11px] font-mono text-slate-400 space-y-0.5 max-w-[280px] truncate">
-                    <p id="pdf-meta-user">User: Operator</p>
-                    <p id="pdf-meta-date">Date: MM/DD/YYYY</p>
+                <!-- Fixed metadata width parameters prevents early text truncation or string clipping operations -->
+                <div class="w-[40%] text-right text-xs font-mono text-slate-400 space-y-1 whitespace-nowrap">
+                    <p id="pdf-meta-user" class="block">User: Operator</p>
+                    <p id="pdf-meta-date" class="block">Date: MM/DD/YYYY</p>
                 </div>
             </div>
 
-            <div class="grid grid-cols-12 gap-4 mb-8 items-stretch">
-                <div class="col-span-5 bg-slate-900/50 p-5 rounded-xl border border-slate-800 flex flex-col justify-center space-y-3">
-                    <h3 class="text-[9px] font-mono text-slate-400 uppercase tracking-wider">Quantitative Risk Metrics</h3>
+            <!-- Quantitative Metrics Layout Map -->
+            <div class="grid grid-cols-12 gap-6 mb-8 items-stretch">
+                <div class="col-span-5 bg-slate-900/50 p-6 rounded-xl border border-slate-800 flex flex-col justify-center space-y-3">
+                    <h3 class="text-[10px] font-mono text-slate-400 uppercase tracking-wider">Quantitative Risk Metrics</h3>
                     <div class="space-y-2 text-sm">
                         <p class="text-slate-300">Total Assessed Hardware: <span id="pdf-stat-total" class="font-mono font-bold text-white text-lg ml-1">0</span></p>
                         <p class="text-slate-300">Max Component Risk Vector: <span id="pdf-stat-max" class="font-mono font-bold text-red-500 text-lg ml-1">0.0</span></p>
                     </div>
                 </div>
                 <div class="col-span-7 bg-slate-900/50 p-4 rounded-xl border border-slate-800 flex justify-center items-center h-44">
-                    <canvas id="pdfDistributionChart"></canvas>
+                    <canvas id="pdfDistributionChart" style="max-height: 150px; width: 100%;"></canvas>
                 </div>
             </div>
 
+            <!-- Threat Intel Table Block Matrix -->
             <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Prioritized Threat Matrix</h3>
             <div class="bg-slate-900/80 rounded-xl border border-slate-800 overflow-hidden">
                 <table class="w-full text-left table-fixed">
@@ -174,7 +179,9 @@
                     <tbody id="pdfTableBody" class="divide-y divide-slate-800/50"></tbody>
                 </table>
             </div>
-            <div class="mt-10 pt-4 border-t border-slate-800 text-center font-mono text-[8px] text-slate-600 tracking-wider">
+
+            <!-- Decorative Footer Node block element layout -->
+            <div class="mt-12 pt-4 border-t border-slate-800 text-center font-mono text-[8px] text-slate-600 tracking-wider">
                 Automated ICS Vulnerability Assessment Matrix • Confidential Cryptographic Integrity Report
             </div>
         </div>
@@ -361,17 +368,18 @@
                 return alert("No parsed data available to compile.");
             }
 
+            const parentWrapper = document.getElementById('pdf-staging-layer');
             const reportElement = document.getElementById('pdf-report-layout');
-            const parentWrapper = reportElement.parentElement;
 
             try {
-                // Provision layout context frame hidden outside visible browser bounds safely
+                // Remove hidden class and style with absolute structural parameters outside rendering viewport bounds
                 parentWrapper.classList.remove('hidden');
-                parentWrapper.style.position = 'fixed';
-                parentWrapper.style.left = '-9999px';
-                parentWrapper.style.top = '0';
+                parentWrapper.style.position = 'absolute';
+                parentWrapper.style.left = '0px';
+                parentWrapper.style.top = '-9999px';
+                parentWrapper.style.display = 'block';
 
-                // Sync dynamic session metadata parameters cleanly without clipping strings
+                // Sync dynamic session metadata parameters without clipping strings
                 let activeUser = "Auditor Session Profile";
                 if (currentUser && currentUser.username) {
                     activeUser = `${currentUser.username} (${currentUser.role})`;
@@ -399,9 +407,8 @@
                     else if (scoreVal >= 7.0) riskColor = "text-orange-500 font-bold";
                     else if (scoreVal > 0) riskColor = "text-yellow-500";
 
-                    // style="page-break-inside: avoid;" ensures long text rows drop clean to the next page instead of duplicating or corrupting text layouts
                     tbody.innerHTML += `
-                        <tr class="text-xs border-t border-slate-800/40" style="page-break-inside: avoid;">
+                        <tr class="text-xs border-t border-slate-800/40" style="page-break-inside: avoid; break-inside: avoid;">
                             <td class="p-3 align-top break-words">
                                 <div class="text-slate-200 font-bold text-xs">${d.Asset_ID}</div>
                                 <div class="text-[9px] text-slate-400 mt-0.5 leading-tight">${d.Make} ${d.Model}</div>
@@ -448,21 +455,24 @@
                         margin:       [10, 10, 10, 10],
                         filename:     `ICS_Risk_Audit_Report_${new Date().toISOString().slice(0,10)}.pdf`,
                         image:        { type: 'jpeg', quality: 0.99 },
-                        html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0b1120', logging: false },
+                        html2canvas:  { scale: 2, useCORS: true, backgroundColor: '#0b1120', logging: false, width: 800 },
                         jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
                     };
 
                     html2pdf().set(configOptions).from(reportElement).save().then(() => {
                         parentWrapper.classList.add('hidden');
+                        parentWrapper.style.display = 'none';
                     }).catch((err) => {
                         console.error(err);
                         parentWrapper.classList.add('hidden');
+                        parentWrapper.style.display = 'none';
                     });
-                }, 500);
+                }, 600);
 
             } catch (err) {
                 console.error(err);
                 parentWrapper.classList.add('hidden');
+                parentWrapper.style.display = 'none';
             }
         }
     </script>
