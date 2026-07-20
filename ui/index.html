@@ -1,56 +1,129 @@
-<!-- Hidden Blueprint Wrapper for html2canvas compilation -->
-<div id="pdf-report-wrapper" class="hidden">
-    <div id="pdf-report-layout" class="p-8 bg-[#0b1120] text-slate-100 font-sans max-w-[210mm] mx-auto">
-        
-        <!-- Header Matrix -->
-        <div class="flex justify-between items-start border-b border-slate-800 pb-4 mb-6">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ICS Risk Auditor Portal</title>
+    <!-- Standard CSS Resets & Base Styles -->
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background-color: #030712;
+            color: #f3f4f6;
+        }
+        .dashboard-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .btn {
+            background-color: #2563eb;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .btn:hover { background-color: #1d4ed8; }
+        .hidden { display: none !important; }
+    </style>
+    <!-- Third-Party PDF Rendering Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+    <div class="dashboard-container">
+        <!-- Main Application Header -->
+        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 1px solid #1f2937; padding-bottom: 20px;">
             <div>
-                <h1 class="text-xl font-black tracking-wider text-white uppercase">ICS Vulnerability Audit Report</h1>
-                <p class="text-xs text-cyan-500 font-mono tracking-tight">COMPLIANCE FRAMEWORK: IEC 62443 / NIST SP 800-82</p>
+                <h1 style="margin: 0; font-size: 28px; font-weight: 800;">ICS Risk Auditor Dashboard</h1>
+                <p style="margin: 5px 0 0 0; color: #9ca3af; font-size: 14px;">Industrial Control Systems Asset Vulnerability Engine</p>
             </div>
-            <div class="text-right font-mono text-[10px] text-slate-400 leading-normal">
-                <div id="pdf-meta-user">User: -</div>
-                <div id="pdf-meta-date">Date: -</div>
+            <div>
+                <button class="btn" onclick="exportAuditPDF()">📥 Download Executive PDF</button>
             </div>
-        </div>
+        </header>
 
-        <!-- Metric Dashboard Blocks & Chart Flex-Row -->
-        <div class="grid grid-cols-12 gap-4 mb-6">
-            <div class="col-span-5 flex flex-col justify-between gap-3">
-                <div class="bg-slate-900/50 border border-slate-800 p-4 rounded-lg">
-                    <span class="text-[10px] text-slate-400 font-medium uppercase tracking-wider block mb-1">Total Assessed Hardware</span>
-                    <span id="pdf-stat-total" class="text-3xl font-black text-white font-mono">0</span>
+        <!-- Main Workspace Row Placeholder -->
+        <main>
+            <p style="color: #6b7280; font-style: italic;">Asset inventory table rows and database matching grid workspace area.</p>
+        </main>
+    </div>
+
+    <!-- ================================================================= -->
+    <!-- CRITICAL: HIDDEN INLINE BLUEPRINT LAYOUT FOR PDF ENGINE          -->
+    <!-- ================================================================= -->
+    <div id="pdf-report-wrapper" style="display: none;">
+        <div id="pdf-report-layout" style="padding: 35px; background-color: #0b1120; color: #f1f5f9; font-family: Arial, sans-serif; max-width: 210mm; margin: 0 auto; box-sizing: border-box;">
+            
+            <!-- Header Matrix -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #1e293b; padding-bottom: 15px; margin-bottom: 25px;">
+                <div>
+                    <h1 style="margin: 0; font-size: 22px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; color: #ffffff;">ICS Vulnerability Audit Report</h1>
+                    <p style="margin: 5px 0 0 0; font-size: 11px; color: #06b6d4; font-family: monospace; font-weight: bold;">COMPLIANCE FRAMEWORK: IEC 62443 / NIST SP 800-82</p>
                 </div>
-                <div class="bg-slate-900/50 border border-slate-800 p-4 rounded-lg">
-                    <span class="text-[10px] text-slate-400 font-medium uppercase tracking-wider block mb-1">Max Component Risk Vector</span>
-                    <span id="pdf-stat-max" class="text-3xl font-black text-red-500 font-mono">0.0</span>
+                <div style="text-align: right; font-family: monospace; font-size: 11px; color: #94a3b8; line-height: 1.6;">
+                    <div id="pdf-meta-user">User: -</div>
+                    <div id="pdf-meta-date">Date: -</div>
                 </div>
             </div>
-            <div class="col-span-7 bg-slate-900/40 border border-slate-800/80 p-4 rounded-lg flex flex-col items-center justify-center h-[160px]">
-                <canvas id="pdfDistributionChart" class="max-h-[140px]"></canvas>
+
+            <!-- Quantitative Risk Metrics & Chart Display Row -->
+            <div style="display: flex; gap: 20px; margin-bottom: 25px; align-items: stretch;">
+                <div style="flex: 5; display: flex; flex-direction: column; justify-content: space-between; gap: 15px;">
+                    <div style="background-color: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; padding: 15px; border-radius: 8px;">
+                        <span style="font-size: 10px; color: #94a3b8; font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 5px; tracking-spacing: 0.5px;">Total Assessed Hardware</span>
+                        <span id="pdf-stat-total" style="font-size: 32px; font-weight: 900; color: #ffffff; font-family: monospace;">0</span>
+                    </div>
+                    <div style="background-color: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; padding: 15px; border-radius: 8px;">
+                        <span style="font-size: 10px; color: #94a3b8; font-weight: 600; text-transform: uppercase; display: block; margin-bottom: 5px; tracking-spacing: 0.5px;">Max Component Risk Vector</span>
+                        <span id="pdf-stat-max" style="font-size: 32px; font-weight: 900; color: #ef4444; font-family: monospace;">0.0</span>
+                    </div>
+                </div>
+                <div style="flex: 7; background-color: rgba(15, 23, 42, 0.4); border: 1px solid rgba(30, 41, 59, 0.8); padding: 15px; border-radius: 8px; display: flex; align-items: center; justify-content: center; height: 165px; box-sizing: border-box;">
+                    <canvas id="pdfDistributionChart" style="max-height: 145px; max-width: 100%;"></canvas>
+                </div>
             </div>
-        </div>
 
-        <!-- Enterprise Threat Table Layout -->
-        <div>
-            <h2 class="text-xs font-bold uppercase tracking-wider text-slate-300 mb-2 font-mono">Prioritized Threat Matrix Matrix</h2>
-            <table class="w-full text-left border-collapse border border-slate-800/80 rounded-lg overflow-hidden">
-                <thead>
-                    <tr class="bg-slate-900/90 text-[10px] text-slate-400 uppercase tracking-wider font-semibold font-mono border-b border-slate-800">
-                        <th class="p-3 w-[30%]">Asset Target</th>
-                        <th class="p-3 w-[55%]">Threat Intelligence & D1 Context</th>
-                        <th class="p-3 w-[15%] text-center">CVSS Score</th>
-                    </tr>
-                </thead>
-                <tbody id="pdfTableBody" class="divide-y divide-slate-800/40">
-                    <!-- Dynamic Rows are completely generated and structuralized via pdf-addon.js -->
-                </tbody>
-            </table>
-        </div>
+            <!-- Enterprise Prioritized Threat Matrix Table -->
+            <div>
+                <h2 style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: #cbd5e1; margin-bottom: 12px; font-family: monospace; letter-spacing: 0.5px;">Prioritized Threat Matrix</h2>
+                <table style="width: 100%; text-align: left; border-collapse: collapse; border: 1px solid rgba(30, 41, 59, 0.6); border-radius: 8px; overflow: hidden;">
+                    <thead>
+                        <tr style="background-color: #0f172a; font-size: 10px; color: #94a3b8; text-transform: uppercase; font-family: monospace; border-bottom: 1px solid #1e293b;">
+                            <th style="padding: 12px; width: 30%;">Asset Target</th>
+                            <th style="padding: 12px; width: 55%;">Threat Intelligence & D1 Context</th>
+                            <th style="padding: 12px; width: 15%; text-align: center;">Risk Score</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pdfTableBody" style="font-size: 11px; background-color: rgba(15, 23, 42, 0.2);">
+                        <!-- Dynamic Rows Injected via JavaScript -->
+                    </tbody>
+                </table>
+            </div>
 
-        <!-- Footer Notice -->
-        <div class="mt-8 pt-4 border-t border-slate-800/50 text-[9px] text-slate-500 font-mono text-center">
-            Automated ICS Vulnerability Assessment Matrix • Confidential Cryptographic Integrity Report
+            <!-- Footer Compliance Disclaimer Notice -->
+            <div style="margin-top: 40px; padding-top: 15px; border-top: 1px solid rgba(30, 41, 59, 0.5); font-size: 9px; color: #64748b; font-family: monospace; text-align: center; letter-spacing: 0.5px;">
+                Automated ICS Vulnerability Assessment Matrix • Confidential Cryptographic Integrity Report
+            </div>
         </div>
     </div>
-</div>
+
+    <!-- Core Script Add-on Link -->
+    <script src="pdf-addon.js"></script>
+    <script>
+        // Mock global data objects matching your structural production app variables
+        // for seamless data-capturing fallback processing
+        window.currentUser = { username: "rushikesh admin" };
+        window.resultsData = [
+            { Asset_ID: "PLC-01", Make: "Siemens", Model: "simatic s7-1200 cpu", cve_id: "CVE-2021-44228", cvss_score: "10.0", description: "Apache Log4j2 JNDI features used in configuration, log messages, and parameters do not protect against attacker controlled LDAP and other JNDI related endpoints.", vuln_status: "ANALYSED" },
+            { Asset_ID: "-01", Make: "", Model: "TP700", cve_id: "CVE-2019-12255", cvss_score: "9.8", description: "IPNET TCP/IP Stack Vulnerability (URGENT/11) affecting multiple Industrial automation systems.", vuln_status: "MODIFIED" },
+            { Asset_ID: "PLC-02", Make: "rockwell", Model: "controllogix 5570", cve_id: "CVE-2016-9343", cvss_score: "10.0", description: "An issue was discovered in Siemens SIMATIC S7-1200 CPU devices. The integrated web server allows remote attackers to obtain sensitive information via specialized HTTP requests.", vuln_status: "ANALYSED" }
+        ];
+    </script>
+</body>
+</html>
